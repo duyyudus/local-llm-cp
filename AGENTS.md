@@ -9,10 +9,10 @@
   - `api_server/app/remote/`: everything that touches the GPU host. `executor.py` defines
     the `RemoteExecutor` protocol, with `ssh.py` (asyncssh) and `local.py` (subprocess)
     implementations. `process.py` launches, probes and stops detached processes,
-    `logs.py` follows server logs, `gpu.py` samples `nvidia-smi`, and `engines/` turns a
-    profile into an argv.
+    `logs.py` follows server logs, `gpu.py` samples `nvidia-smi`, `system.py` samples CPU
+    and memory from `/proc`, and `engines/` turns a profile into an argv.
   - `api_server/app/runtime.py`: process-wide state (host connection, live run statuses,
-    log and GPU hubs) created in the FastAPI lifespan.
+    log, GPU and system hubs) created in the FastAPI lifespan.
   - `common/`: configuration, logging, SQLAlchemy models and session helpers.
   - `alembic/`: database migrations. `tests/`: the pytest suite.
 - `dashboard/` is the React 19, Vite, TypeScript, Tailwind CSS, daisyUI dashboard, organised

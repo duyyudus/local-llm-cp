@@ -1,5 +1,5 @@
 from api_server.app.schemas.common import ListEnvelope
-from api_server.app.schemas.host import DirEntryRead, DirListingRead, GpuRead, HostRead
+from api_server.app.schemas.host import DirEntryRead, DirListingRead, GpuRead, HostRead, SystemRead
 from api_server.app.schemas.profiles import (
     CommandPreview,
     ImportConflict,
@@ -25,4 +25,5 @@ __all__ = [
     "ProfileRead",
     "ProfileUpdate",
     "RunStatus",
+    "SystemRead",
 ]

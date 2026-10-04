@@ -14,6 +14,7 @@ from api_server.app.remote.local import LocalExecutor
 from api_server.app.remote.logs import LogHub
 from api_server.app.remote.process import ProcessManager, process_matches
 from api_server.app.remote.ssh import SSHExecutor
+from api_server.app.remote.system import SystemSampler
 from common.config import Settings
 from common.db.models import Profile, Run, utcnow
 
@@ -47,7 +48,7 @@ def status_from_http_code(code: str) -> str:
 
 
 class Runtime:
-    """Process-wide state: the host connection, live run statuses, log and GPU streams."""
+    """Process-wide state: the host connection, live run statuses, log, GPU and system streams."""
 
     def __init__(
         self,
@@ -70,6 +71,12 @@ class Runtime:
             process_interval=settings.gpu_process_interval_seconds,
             resolve_pid=self.profile_for_pid,
         )
+        self.system = SystemSampler(
+            self.executor,
+            history_samples=settings.gpu_history_samples,
+            process_interval=settings.gpu_process_interval_seconds,
+            live_processes=self.live_processes,
+        )
         # Serialises start/stop with the status poll so they never race on a run.
         self.lock = asyncio.Lock()
         self.live: dict[str, LiveRun] = {}
@@ -77,6 +84,7 @@ class Runtime:
 
     async def start(self) -> None:
         self.gpu.start()
+        self.system.start()
         self._task = asyncio.create_task(self._poll())
 
     async def stop(self) -> None:
@@ -86,6 +94,7 @@ class Runtime:
                 await self._task
             self._task = None
         await self.gpu.close()
+        await self.system.close()
         await self.logs.close()
         await self.executor.close()
 
@@ -94,6 +103,9 @@ class Runtime:
             if run.pid == pid:
                 return run.profile_id, run.profile_name
         return None
+
+    def live_processes(self) -> list[tuple[int, str, str]]:
+        return [(run.pid, run.profile_id, run.profile_name) for run in self.live.values()]
 
     def status_for(self, profile_id: str) -> str | None:
         run = self.live.get(profile_id)

@@ -9,12 +9,14 @@ servers on a GPU machine. It replaces a folder of launch scripts and the two SSH
 - **Console**: the live log of each running server, as you would see it in a terminal.
 - **GPUs**: per-GPU VRAM and compute usage, temperature, power, and which running profile
   holds how much VRAM.
+- **CPU and memory**: host CPU usage, RAM and swap, and the resident memory of each running
+  profile, for models that are partly offloaded to the CPU.
 
 ## How it works
 
 The app runs anywhere on your network and controls the GPU host over SSH. Nothing is
-installed on the GPU host; it needs `bash`, `nvidia-smi`, and optionally `curl` (used to
-tell "loading" from "ready").
+installed on the GPU host; it needs `bash`, `nvidia-smi`, a Linux `/proc`, and optionally
+`curl` (used to tell "loading" from "ready").
 
 Servers are started detached, so they keep running if the app restarts or the connection
 drops. The app picks them up again when it comes back. Each profile logs to

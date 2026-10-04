@@ -12,8 +12,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Logo } from "../components/Logo";
 import { StatusBadge } from "../components/StatusBadge";
 import { ConsolePanel } from "../features/console/ConsolePanel";
-import { GpuPanel } from "../features/gpu/GpuPanel";
-import { useGpuStream } from "../features/gpu/useGpuStream";
+import { MetricsPanel } from "../features/metrics/MetricsPanel";
+import { useMetricsStream } from "../features/metrics/useMetricsStream";
 import { ImportDialog } from "../features/profiles/ImportDialog";
 import { ProfileForm } from "../features/profiles/ProfileForm";
 import { ProfileList } from "../features/profiles/ProfileList";
@@ -60,7 +60,7 @@ export function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("llm-cp-theme") ?? "dark");
   const [sidebarWidth, setSidebarWidth] = useState(() => storedNumber("llm-cp-sidebar", 420));
   const dragging = useRef(false);
-  const gpuStream = useGpuStream();
+  const metrics = useMetricsStream();
 
   useEffect(() => {
     const dark = theme !== "light";
@@ -319,7 +319,7 @@ export function App() {
           role="separator"
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3">
-          <GpuPanel stream={gpuStream} />
+          <MetricsPanel stream={metrics} />
           <ConsolePanel onSelect={(profile) => setSelectedId(profile.id)} selected={selected} tabs={tabs} />
         </main>
       </div>

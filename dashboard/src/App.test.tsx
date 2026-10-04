@@ -290,7 +290,9 @@ describe("App", () => {
       processes: [{ pid: 4242, used_mb: 11264, profile_id: "prf_1", profile_name: "qwen" }],
     };
     act(() => {
-      MockEventSource.find("/gpu/stream").emit("history", { snapshots: [{ ts: 1, gpus: [gpu] }] });
+      MockEventSource.find("/host/stream").emit("gpu_history", {
+        snapshots: [{ ts: 1, gpus: [gpu] }],
+      });
     });
     expect(screen.getByText("GeForce RTX 3090", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("12.0 / 24.0 GiB")).toBeInTheDocument();
@@ -299,5 +301,38 @@ describe("App", () => {
       "87",
     );
     expect(screen.getByText("11.0 GiB")).toBeInTheDocument();
+  });
+
+  it("renders CPU and memory meters next to the GPUs", async () => {
+    render(<App />);
+    expect(await screen.findAllByText("Connecting to the API")).toHaveLength(2);
+    const system = {
+      ts: 1,
+      cpu_name: "AMD Ryzen 9 5950X 16-Core Processor",
+      cpu_threads: 32,
+      cpu_utilization_pct: 42.4,
+      memory_used_mb: 49152,
+      memory_total_mb: 65536,
+      swap_used_mb: 1024,
+      swap_total_mb: 8192,
+      processes: [{ pid: 4242, rss_mb: 21504, profile_id: "prf_1", profile_name: "qwen" }],
+    };
+    const source = MockEventSource.find("/host/stream");
+    act(() => {
+      source.emit("system_history", { snapshots: [system] });
+      source.emit("system_snapshot", { ...system, ts: 2, cpu_utilization_pct: 90 });
+    });
+    expect(screen.getByText("AMD Ryzen 9 5950X 16-Core Processor")).toBeInTheDocument();
+    expect(screen.getByText("48.0 / 64.0 GiB")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "CPU 90%" })).toHaveAttribute(
+      "aria-valuenow",
+      "90",
+    );
+    expect(screen.getByText("swap 1.0 / 8.0 GiB", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("21.0 GiB")).toBeInTheDocument();
+    // The GPU side reports its own failure without hiding the system card.
+    act(() => source.emit("gpu_status", { error: "nvidia-smi failed: not found" }));
+    expect(screen.getByText("nvidia-smi failed: not found")).toBeInTheDocument();
+    expect(screen.getByText("48.0 / 64.0 GiB")).toBeInTheDocument();
   });
 });

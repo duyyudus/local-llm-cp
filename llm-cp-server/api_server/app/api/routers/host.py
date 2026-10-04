@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException
 
 from api_server.app.api.dependencies import RuntimeDep
 from api_server.app.api.sse import KEEPALIVE, KEEPALIVE_SECONDS, sse_event, sse_response
-from api_server.app.schemas import DirListingRead, GpuRead, HostRead
+from api_server.app.remote.samples import SampleHistory
+from api_server.app.schemas import DirListingRead, GpuRead, HostRead, SystemRead
 
 router = APIRouter()
 
@@ -32,30 +33,43 @@ async def gpu(runtime: RuntimeDep) -> GpuRead:
     return GpuRead(error=runtime.gpu.error, snapshot=runtime.gpu.latest)
 
 
-@router.get("/gpu/stream")
-async def gpu_stream(runtime: RuntimeDep):
-    sampler = runtime.gpu
+@router.get("/system", response_model=SystemRead)
+async def system(runtime: RuntimeDep) -> SystemRead:
+    return SystemRead(error=runtime.system.error, snapshot=runtime.system.latest)
+
+
+@router.get("/host/stream")
+async def host_stream(runtime: RuntimeDep):
+    # GPU and system samples share one stream so a browser tab holds a single connection.
+    feeds: list[tuple[str, SampleHistory]] = [("gpu", runtime.gpu), ("system", runtime.system)]
 
     async def generate() -> AsyncIterator[str]:
-        seq = sampler.first_seq
-        error: str | None = None
+        seqs = {name: sampler.first_seq for name, sampler in feeds}
+        errors: dict[str, str | None] = {name: None for name, _ in feeds}
         first = True
         while True:
-            # Grab the event before reading so an update in between still wakes us.
-            event = sampler.event
-            snapshots, seq = sampler.since(seq)
-            if first:
-                yield sse_event("history", {"snapshots": snapshots})
-                first = False
-            else:
-                for snapshot in snapshots:
-                    yield sse_event("snapshot", snapshot)
-            if sampler.error != error:
-                error = sampler.error
-                yield sse_event("status", {"error": error})
+            # Grab the events before reading so an update in between still wakes us.
+            events = [sampler.event for _, sampler in feeds]
+            for name, sampler in feeds:
+                snapshots, seqs[name] = sampler.since(seqs[name])
+                if first:
+                    yield sse_event(f"{name}_history", {"snapshots": snapshots})
+                else:
+                    for snapshot in snapshots:
+                        yield sse_event(f"{name}_snapshot", snapshot)
+                if sampler.error != errors[name]:
+                    errors[name] = sampler.error
+                    yield sse_event(f"{name}_status", {"error": sampler.error})
+            first = False
+            waiters = [asyncio.create_task(event.wait()) for event in events]
             try:
-                await asyncio.wait_for(event.wait(), KEEPALIVE_SECONDS)
-            except TimeoutError:
+                done, _ = await asyncio.wait(
+                    waiters, timeout=KEEPALIVE_SECONDS, return_when=asyncio.FIRST_COMPLETED
+                )
+            finally:
+                for waiter in waiters:
+                    waiter.cancel()
+            if not done:
                 yield KEEPALIVE
 
     return sse_response(generate())

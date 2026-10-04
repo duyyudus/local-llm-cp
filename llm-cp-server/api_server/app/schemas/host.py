@@ -28,3 +28,8 @@ class DirListingRead(BaseModel):
 class GpuRead(BaseModel):
     error: str | None = None
     snapshot: dict[str, Any] | None = None
+
+
+class SystemRead(BaseModel):
+    error: str | None = None
+    snapshot: dict[str, Any] | None = None

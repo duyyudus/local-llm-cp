@@ -97,6 +97,25 @@ export type Gpu = {
 
 export type GpuSnapshot = { ts: number; gpus: Gpu[] };
 
+export type SystemProcess = {
+  pid: number;
+  rss_mb: number;
+  profile_id: string;
+  profile_name: string;
+};
+
+export type SystemSnapshot = {
+  ts: number;
+  cpu_name: string;
+  cpu_threads: number;
+  cpu_utilization_pct: number | null;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  swap_used_mb: number;
+  swap_total_mb: number;
+  processes: SystemProcess[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -165,6 +184,6 @@ export function logStreamUrl(profileId: string): string {
   return `${API_BASE_URL}/profiles/${profileId}/logs/stream`;
 }
 
-export function gpuStreamUrl(): string {
-  return `${API_BASE_URL}/gpu/stream`;
+export function hostStreamUrl(): string {
+  return `${API_BASE_URL}/host/stream`;
 }

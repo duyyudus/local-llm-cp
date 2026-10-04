@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections import deque
 from collections.abc import Callable
 from typing import Any
 
 from api_server.app.remote.executor import RemoteExecutor, RemoteUnavailableError
+from api_server.app.remote.samples import SampleHistory
 
 GPU_FIELDS = (
     "index,uuid,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw"
@@ -18,7 +18,6 @@ APPS_QUERY = (
 )
 RETRY_SECONDS = 5.0
 
-Snapshot = dict[str, Any]
 PidResolver = Callable[[int], tuple[str, str] | None]
 
 
@@ -56,7 +55,7 @@ def parse_apps(output: str) -> dict[str, list[tuple[int, float | None]]]:
     return apps
 
 
-class GpuSampler:
+class GpuSampler(SampleHistory):
     """Streams `nvidia-smi -l 1` from the GPU host and keeps a short history."""
 
     def __init__(
@@ -67,27 +66,12 @@ class GpuSampler:
         process_interval: float,
         resolve_pid: PidResolver,
     ) -> None:
+        super().__init__(history_samples)
         self._executor = executor
         self._process_interval = process_interval
         self._resolve_pid = resolve_pid
-        self._history: deque[Snapshot] = deque(maxlen=history_samples)
         self._apps: dict[str, list[tuple[int, float | None]]] = {}
         self._tasks: list[asyncio.Task[None]] = []
-        self.next_seq = 0
-        self.error: str | None = None
-        self.event = asyncio.Event()
-
-    @property
-    def first_seq(self) -> int:
-        return self.next_seq - len(self._history)
-
-    @property
-    def latest(self) -> Snapshot | None:
-        return self._history[-1] if self._history else None
-
-    def since(self, seq: int) -> tuple[list[Snapshot], int]:
-        start = max(seq, self.first_seq)
-        return list(self._history)[start - self.first_seq :], self.next_seq
 
     def start(self) -> None:
         self._tasks = [
@@ -103,15 +87,6 @@ class GpuSampler:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    def _notify(self) -> None:
-        event, self.event = self.event, asyncio.Event()
-        event.set()
-
-    def _set_error(self, message: str | None) -> None:
-        if message != self.error:
-            self.error = message
-            self._notify()
-
     def publish(self, gpus: list[dict[str, Any]]) -> None:
         for gpu in gpus:
             processes = []
@@ -126,10 +101,7 @@ class GpuSampler:
                     }
                 )
             gpu["processes"] = processes
-        self._history.append({"ts": round(time.time() * 1000), "gpus": gpus})
-        self.next_seq += 1
-        self.error = None
-        self._notify()
+        self._append({"ts": round(time.time() * 1000), "gpus": gpus})
 
     async def _sample_gpus(self) -> None:
         while True:

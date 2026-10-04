@@ -1,7 +1,7 @@
 const WIDTH = 120;
 const HEIGHT = 28;
 
-/** One series on a fixed 0..max scale, so neighbouring GPUs are comparable. */
+/** One series on a fixed 0..max scale, so neighbouring cards are comparable. */
 export function Sparkline({
   values,
   max,
