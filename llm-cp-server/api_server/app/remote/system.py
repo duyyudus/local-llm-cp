@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from api_server.app.remote.activity import Activity
 from api_server.app.remote.executor import RemoteExecutor, RemoteUnavailableError, bash
 from api_server.app.remote.samples import SampleHistory
 
@@ -92,9 +93,11 @@ class SystemSampler(SampleHistory):
         history_samples: int,
         process_interval: float,
         live_processes: LiveProcesses,
+        activity: Activity | None = None,
     ) -> None:
         super().__init__(history_samples)
         self._executor = executor
+        self._activity = activity or Activity()
         self._process_interval = process_interval
         self._live_processes = live_processes
         self._rss: dict[int, float] = {}
@@ -142,6 +145,7 @@ class SystemSampler(SampleHistory):
 
     async def _sample_system(self) -> None:
         while True:
+            await self._activity.wait()
             try:
                 info = parse_info((await self._executor.run(INFO_QUERY)).stdout)
                 if info is None:
@@ -152,6 +156,8 @@ class SystemSampler(SampleHistory):
                         self._executor.stream(bash(SAMPLE_SCRIPT))
                     ) as lines:
                         async for line in lines:
+                            if not self._activity.active:
+                                break
                             sample = parse_sample(line)
                             if sample is None:
                                 continue
@@ -160,13 +166,15 @@ class SystemSampler(SampleHistory):
                             if previous is not None:
                                 self.publish(*info, cpu_percent(previous, times), memory)
                             previous = times
-                    self._set_error("system stats stream ended")
+                        else:
+                            self._set_error("system stats stream ended")
             except RemoteUnavailableError as exc:
                 self._set_error(str(exc))
             await asyncio.sleep(RETRY_SECONDS)
 
     async def _sample_rss(self) -> None:
         while True:
+            await self._activity.wait()
             pids = [pid for pid, _, _ in self._live_processes()]
             try:
                 if pids:

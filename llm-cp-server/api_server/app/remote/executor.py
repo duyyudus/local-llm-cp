@@ -52,8 +52,10 @@ class RemoteExecutor(Protocol):
 
     async def close(self) -> None: ...
 
-    async def run(self, command: str, timeout: float = 15.0) -> CommandResult:
-        """Run a shell command to completion on the GPU host."""
+    async def run(
+        self, command: str, timeout: float = 15.0, input: str | None = None
+    ) -> CommandResult:
+        """Run a shell command to completion on the GPU host, feeding `input` to its stdin."""
 
     def stream(self, command: str) -> AsyncIterator[str]:
         """Yield output lines of a long-running command; closing the iterator kills it."""

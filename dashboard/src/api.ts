@@ -151,6 +151,7 @@ async function errorDetail(response: Response): Promise<string> {
 
 export const api = {
   host: () => request<HostInfo>("/host"),
+  shutdownHost: () => request<void>("/host/shutdown", { method: "POST" }),
   browse: (path: string) =>
     request<DirListing>(`/host/browse?path=${encodeURIComponent(path)}`),
   profiles: () => request<ListEnvelope<Profile>>("/profiles"),

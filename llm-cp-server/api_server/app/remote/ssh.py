@@ -108,10 +108,14 @@ class SSHExecutor:
             logger.warning(self._error)
             conn.close()
 
-    async def run(self, command: str, timeout: float = 15.0) -> CommandResult:
+    async def run(
+        self, command: str, timeout: float = 15.0, input: str | None = None
+    ) -> CommandResult:
         conn = await self._connection()
         try:
-            result = await conn.run(command, check=False, timeout=timeout, errors="replace")
+            result = await conn.run(
+                command, check=False, timeout=timeout, errors="replace", input=input
+            )
         except asyncssh.TimeoutError as exc:
             raise RemoteUnavailableError(f"Command timed out after {timeout:.0f}s") from exc
         except (OSError, asyncssh.Error) as exc:

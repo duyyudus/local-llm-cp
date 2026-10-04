@@ -1,4 +1,4 @@
-import { Moon, Server, Sun, X } from "lucide-react";
+import { Moon, Power, Server, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -53,6 +53,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [confirmShutdown, setConfirmShutdown] = useState(false);
+  const [shuttingDown, setShuttingDown] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -131,6 +133,20 @@ export function App() {
     void runAction(profile, () =>
       kind === "stop" ? api.stopProfile(profile.id) : api.deleteProfile(profile.id),
     );
+  }
+
+  async function shutdownHost() {
+    setConfirmShutdown(false);
+    setShuttingDown(true);
+    setActionError(null);
+    try {
+      await api.shutdownHost();
+      setNotice("Shutdown requested. The GPU host is powering off.");
+    } catch (reason) {
+      setActionError(`Shutdown: ${errorMessage(reason)}`);
+    } finally {
+      setShuttingDown(false);
+    }
   }
 
   async function exportProfiles(profile: Profile | null) {
@@ -241,6 +257,16 @@ export function App() {
           ) : (
             <StatusBadge tone="error">API offline</StatusBadge>
           )}
+          <button
+            aria-label="Shut down host"
+            className="btn btn-sm btn-ghost text-error"
+            disabled={!host?.connected || shuttingDown}
+            onClick={() => setConfirmShutdown(true)}
+            title="Shut down host"
+            type="button"
+          >
+            <Power className="h-4 w-4" />
+          </button>
           <button
             aria-label="Toggle colour theme"
             className="btn btn-sm btn-ghost"
@@ -358,6 +384,19 @@ export function App() {
         title={
           confirm ? `${confirm.kind === "stop" ? "Stop" : "Delete"} ${confirm.profile.name}?` : ""
         }
+      />
+
+      <ConfirmDialog
+        confirmLabel="Shut down"
+        description={
+          runningCount > 0
+            ? `The machine powers off and ${runningCount} running server${runningCount === 1 ? " is" : "s are"} stopped. It has to be switched back on by hand.`
+            : "The machine powers off. It has to be switched back on by hand."
+        }
+        onCancel={() => setConfirmShutdown(false)}
+        onConfirm={() => void shutdownHost()}
+        open={confirmShutdown}
+        title={`Shut down ${host?.mode === "local" ? "local host" : (host?.target ?? "host")}?`}
       />
     </div>
   );

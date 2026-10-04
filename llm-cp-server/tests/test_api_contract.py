@@ -185,3 +185,16 @@ async def test_browse(client, tmp_path) -> None:
     assert listing["entries"][0]["name"] == "models"
     missing = await client.get("/host/browse", params={"path": str(tmp_path / "nope")})
     assert missing.status_code == 404
+
+
+async def test_host_shutdown(client, runtime, tmp_path: Path) -> None:
+    runtime.settings.gpu_ssh_password = "hunter2"
+    response = await client.post("/host/shutdown")
+    assert response.status_code == 204
+    # The password reaches the command on stdin, as `sudo -S` expects.
+    assert (tmp_path / "shutdown-requested").read_text() == "hunter2\n"
+
+    runtime.settings.host_shutdown_command = "echo 'sudo: a password is required' >&2; exit 1"
+    refused = await client.post("/host/shutdown")
+    assert refused.status_code == 502
+    assert refused.json()["detail"] == "Shutdown command failed: sudo: a password is required"

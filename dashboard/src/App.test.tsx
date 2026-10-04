@@ -62,6 +62,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 }
 
 let profiles: Profile[] = [];
+let hostConnected = true;
 const calls: { method: string; path: string; body?: unknown }[] = [];
 
 function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -73,7 +74,16 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     Promise.resolve(new Response(JSON.stringify(data), { status }));
 
   if (path === "/host") {
-    return json({ mode: "ssh", target: "me@gpu:22", connected: true, error: null, gpu_error: null });
+    return json({
+      mode: "ssh",
+      target: "me@gpu:22",
+      connected: hostConnected,
+      error: null,
+      gpu_error: null,
+    });
+  }
+  if (path === "/host/shutdown") {
+    return Promise.resolve(new Response(null, { status: 204 }));
   }
   if (path === "/profiles" && method === "GET") {
     return json({ items: profiles, total: profiles.length });
@@ -112,6 +122,7 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
 
 beforeEach(() => {
   profiles = [];
+  hostConnected = true;
   calls.length = 0;
   MockEventSource.instances = [];
   localStorage.clear();
@@ -186,6 +197,27 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop server" }));
     await waitFor(() => expect(calls.some((call) => call.path.endsWith("/stop"))).toBe(true));
     await screen.findByRole("button", { name: "Start" });
+  });
+
+  it("shuts the host down after confirmation", async () => {
+    render(<App />);
+    await screen.findByText("me@gpu:22");
+    const button = screen.getByRole("button", { name: "Shut down host" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(calls.some((call) => call.path === "/host/shutdown")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Shut down" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Shutdown requested");
+    expect(calls.some((call) => call.path === "/host/shutdown" && call.method === "POST")).toBe(
+      true,
+    );
+  });
+
+  it("disables the shutdown button while the host is offline", async () => {
+    hostConnected = false;
+    render(<App />);
+    await screen.findByText(/me@gpu:22 offline/);
+    expect(screen.getByRole("button", { name: "Shut down host" })).toBeDisabled();
   });
 
   it("shows the backend error when a start is refused", async () => {

@@ -44,6 +44,9 @@ def settings(tmp_path: Path) -> Settings:
         remote_mode="local",
         remote_state_dir=str(tmp_path / "state"),
         stop_timeout_seconds=3,
+        dashboard_idle_seconds=0,
+        # Tests run on this machine; never let one power it off.
+        host_shutdown_command=f"cat > {tmp_path}/shutdown-requested",
     )
 
 

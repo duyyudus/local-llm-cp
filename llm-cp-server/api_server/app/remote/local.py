@@ -28,17 +28,20 @@ class LocalExecutor:
     async def close(self) -> None:
         return None
 
-    async def run(self, command: str, timeout: float = 15.0) -> CommandResult:
+    async def run(
+        self, command: str, timeout: float = 15.0, input: str | None = None
+    ) -> CommandResult:
         process = await asyncio.create_subprocess_exec(
             "bash",
             "-c",
             command,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL if input is None else asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        data = None if input is None else input.encode()
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+            stdout, stderr = await asyncio.wait_for(process.communicate(data), timeout)
         except TimeoutError as exc:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()

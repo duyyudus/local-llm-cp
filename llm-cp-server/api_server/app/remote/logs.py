@@ -6,6 +6,7 @@ import shlex
 from collections import deque
 from itertools import islice
 
+from api_server.app.remote.activity import Activity
 from api_server.app.remote.executor import (
     RemoteExecutor,
     RemoteUnavailableError,
@@ -58,8 +59,15 @@ class LogChannel:
 class LogHub:
     """Keeps one `tail -F` per running profile and fans its lines out to subscribers."""
 
-    def __init__(self, executor: RemoteExecutor, max_lines: int, backlog_lines: int) -> None:
+    def __init__(
+        self,
+        executor: RemoteExecutor,
+        max_lines: int,
+        backlog_lines: int,
+        activity: Activity | None = None,
+    ) -> None:
         self._executor = executor
+        self._activity = activity or Activity()
         self._max_lines = max_lines
         self._backlog_lines = backlog_lines
         self._channels: dict[str, LogChannel] = {}
@@ -128,6 +136,8 @@ class LogHub:
         quoted = shlex.quote(log_path)
         next_line: int | None = None
         while True:
+            # An open tail keeps running; only reconnecting waits for a dashboard.
+            await self._activity.wait()
             try:
                 if next_line is None:
                     result = await self._executor.run(

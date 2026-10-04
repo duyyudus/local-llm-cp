@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from api_server.app.remote.activity import Activity
 from api_server.app.remote.executor import RemoteExecutor, RemoteUnavailableError
 from api_server.app.remote.gpu import GpuSampler
 from api_server.app.remote.local import LocalExecutor
@@ -60,22 +61,26 @@ class Runtime:
         self.session_factory = session_factory
         self.executor = executor or make_executor(settings)
         self.processes = ProcessManager(self.executor, settings)
+        self.activity = Activity(settings.dashboard_idle_seconds)
         self.logs = LogHub(
             self.executor,
             max_lines=settings.log_buffer_lines,
             backlog_lines=settings.log_backlog_lines,
+            activity=self.activity,
         )
         self.gpu = GpuSampler(
             self.executor,
             history_samples=settings.gpu_history_samples,
             process_interval=settings.gpu_process_interval_seconds,
             resolve_pid=self.profile_for_pid,
+            activity=self.activity,
         )
         self.system = SystemSampler(
             self.executor,
             history_samples=settings.gpu_history_samples,
             process_interval=settings.gpu_process_interval_seconds,
             live_processes=self.live_processes,
+            activity=self.activity,
         )
         # Serialises start/stop with the status poll so they never race on a run.
         self.lock = asyncio.Lock()
@@ -113,6 +118,7 @@ class Runtime:
 
     async def _poll(self) -> None:
         while True:
+            await self.activity.wait()
             try:
                 await self.refresh()
             except Exception:

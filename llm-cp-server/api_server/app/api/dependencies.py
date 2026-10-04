@@ -14,6 +14,11 @@ def get_runtime(request: Request) -> Runtime:
     return request.app.state.runtime
 
 
+def mark_active(request: Request) -> None:
+    """Any dashboard request resumes host polling; health probes do not count."""
+    request.app.state.runtime.activity.touch()
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 RuntimeDep = Annotated[Runtime, Depends(get_runtime)]

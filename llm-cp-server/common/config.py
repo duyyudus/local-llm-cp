@@ -27,12 +27,17 @@ class Settings(BaseSettings):
     gpu_ssh_password: str = ""
     gpu_ssh_known_hosts: str = ""
     remote_state_dir: str = "~/.local/state/local-llm-cp"
+    # GPU_SSH_PASSWORD is fed to its stdin for `sudo -S`; without one the SSH user
+    # needs passwordless sudo on the GPU host.
+    host_shutdown_command: str = "sudo -S -p '' shutdown -h now"
 
     # Comma-separated list; the regex covers private-network origins on any port.
     api_cors_origins: str = "http://localhost:5173"
     api_cors_origin_regex: str = DEFAULT_API_CORS_ORIGIN_REGEX
 
     status_poll_interval_seconds: float = 3.0
+    # Host polling pauses this long after the last dashboard request. 0 polls all the time.
+    dashboard_idle_seconds: float = 2.0
     stop_timeout_seconds: int = 10
     log_buffer_lines: int = 5000
     log_backlog_lines: int = 1000

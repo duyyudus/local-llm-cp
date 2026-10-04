@@ -46,22 +46,23 @@ async def stream_logs(profile_id: str, request: Request, runtime: RuntimeDep):
     channel = runtime.logs.channel(profile_id)
 
     async def generate() -> AsyncIterator[str]:
-        generation: int | None = None
-        seq = 0
-        while True:
-            # Grab the event before reading so a line appended in between still wakes us.
-            event = channel.event
-            if channel.generation != generation:
-                generation = channel.generation
-                seq = channel.first_seq
-                yield sse_event("reset", {})
-            lines, seq = channel.since(seq)
-            if lines:
-                yield sse_event("lines", {"lines": lines})
-                continue
-            try:
-                await asyncio.wait_for(event.wait(), KEEPALIVE_SECONDS)
-            except TimeoutError:
-                yield KEEPALIVE
+        with runtime.activity.stream():
+            generation: int | None = None
+            seq = 0
+            while True:
+                # Grab the event before reading so a line appended in between still wakes us.
+                event = channel.event
+                if channel.generation != generation:
+                    generation = channel.generation
+                    seq = channel.first_seq
+                    yield sse_event("reset", {})
+                lines, seq = channel.since(seq)
+                if lines:
+                    yield sse_event("lines", {"lines": lines})
+                    continue
+                try:
+                    await asyncio.wait_for(event.wait(), KEEPALIVE_SECONDS)
+                except TimeoutError:
+                    yield KEEPALIVE
 
     return sse_response(generate())
