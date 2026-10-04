@@ -51,6 +51,17 @@ export type Profile = ProfilePayload & {
   updated_at: string;
 };
 
+export type ImportConflict = "skip" | "rename" | "overwrite";
+
+export type ProfileExport = {
+  format: string;
+  version: number;
+  exported_at: string | null;
+  profiles: ProfilePayload[];
+};
+
+export type ImportResult = { created: string[]; updated: string[]; skipped: string[] };
+
 export type CommandPreview = { command: string; argv: string[] };
 
 export type HostInfo = {
@@ -131,6 +142,15 @@ export const api = {
   deleteProfile: (id: string) => request<void>(`/profiles/${id}`, { method: "DELETE" }),
   duplicateProfile: (id: string) =>
     request<Profile>(`/profiles/${id}/duplicate`, { method: "POST" }),
+  exportProfiles: (ids: string[]) =>
+    request<ProfileExport>(
+      `/profiles/export?${ids.map((id) => `id=${encodeURIComponent(id)}`).join("&")}`,
+    ),
+  importProfiles: (document: ProfileExport, onConflict: ImportConflict) =>
+    request<ImportResult>(`/profiles/import?on_conflict=${onConflict}`, {
+      method: "POST",
+      body: JSON.stringify(document),
+    }),
   previewCommand: (payload: ProfilePayload, signal?: AbortSignal) =>
     request<CommandPreview>("/profiles/preview-command", {
       method: "POST",

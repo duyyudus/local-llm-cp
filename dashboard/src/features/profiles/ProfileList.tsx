@@ -1,4 +1,5 @@
-import { Copy, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
+import { Copy, Download, Pencil, Play, Plus, Square, Trash2, Upload } from "lucide-react";
+import { useRef } from "react";
 
 import type { Profile } from "../../api";
 import { classNames } from "../../lib/classNames";
@@ -16,6 +17,8 @@ export function ProfileList({
   onEdit,
   onDuplicate,
   onDelete,
+  onExport,
+  onImport,
   onStart,
   onStop,
 }: {
@@ -29,19 +32,57 @@ export function ProfileList({
   onEdit: (profile: Profile) => void;
   onDuplicate: (profile: Profile) => void;
   onDelete: (profile: Profile) => void;
+  onExport: (profile: Profile | null) => void;
+  onImport: (file: File) => void;
   onStart: (profile: Profile) => void;
   onStop: (profile: Profile) => void;
 }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-200">
           Profiles <span className="font-normal text-zinc-500">{profiles.length}</span>
         </h2>
-        <button className="btn btn-sm btn-primary" onClick={onCreate} type="button">
-          <Plus className="h-4 w-4" />
-          New profile
-        </button>
+        <div className="flex items-center gap-1">
+          <input
+            accept=".json,application/json"
+            className="hidden"
+            data-testid="import-file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Reset so choosing the same file again still fires a change.
+              event.target.value = "";
+              if (file) onImport(file);
+            }}
+            ref={fileInput}
+            type="file"
+          />
+          <button
+            aria-label="Import profiles"
+            className="btn btn-sm btn-ghost"
+            onClick={() => fileInput.current?.click()}
+            title="Import profiles from a JSON file"
+            type="button"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+          <button
+            aria-label="Export all profiles"
+            className="btn btn-sm btn-ghost"
+            disabled={profiles.length === 0}
+            onClick={() => onExport(null)}
+            title="Export all profiles to a JSON file"
+            type="button"
+          >
+            <Upload className="h-4 w-4" />
+          </button>
+          <button className="btn btn-sm btn-primary" onClick={onCreate} type="button">
+            <Plus className="h-4 w-4" />
+            New profile
+          </button>
+        </div>
       </div>
       <ul className="min-h-0 flex-1 overflow-y-auto">
         {profiles.length === 0 ? (
@@ -123,7 +164,7 @@ export function ProfileList({
                   </button>
                 )}
               </div>
-              <div className="mt-2 flex gap-1">
+              <div className="mt-2 flex flex-wrap gap-1">
                 <button className="btn btn-xs btn-ghost" onClick={() => onEdit(profile)} type="button">
                   <Pencil className="h-3.5 w-3.5" />
                   Edit
@@ -135,6 +176,14 @@ export function ProfileList({
                 >
                   <Copy className="h-3.5 w-3.5" />
                   Duplicate
+                </button>
+                <button
+                  className="btn btn-xs btn-ghost"
+                  onClick={() => onExport(profile)}
+                  type="button"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  Export
                 </button>
                 <button
                   className="btn btn-xs btn-ghost text-error"

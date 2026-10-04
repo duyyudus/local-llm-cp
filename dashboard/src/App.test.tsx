@@ -78,6 +78,13 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   if (path === "/profiles" && method === "GET") {
     return json({ items: profiles, total: profiles.length });
   }
+  if (path === "/profiles/export") {
+    const payloads = profiles.map(({ id, command, run, created_at, updated_at, ...rest }) => rest);
+    return json({ format: "llm-cp-profiles", version: 1, exported_at: null, profiles: payloads });
+  }
+  if (path === "/profiles/import") {
+    return json({ created: ["gemma"], updated: [], skipped: ["qwen"] });
+  }
   if (path === "/profiles/preview-command") {
     return json({ command: `${body.executable_path} --port ${body.port}`, argv: [] });
   }
@@ -215,6 +222,57 @@ describe("App", () => {
       model_path: null,
       extra_args: ["--jinja", "--parallel 2"],
     });
+  });
+
+  it("exports all profiles to a JSON download", async () => {
+    profiles = [makeProfile()];
+    const blobs: Blob[] = [];
+    URL.createObjectURL = vi.fn((blob: Blob) => (blobs.push(blob), "blob:export"));
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<App />);
+    await screen.findByText("qwen");
+    fireEvent.click(screen.getByRole("button", { name: "Export all profiles" }));
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const exported = JSON.parse(await blobs[0].text());
+    expect(exported.format).toBe("llm-cp-profiles");
+    expect(exported.profiles[0]).toMatchObject({ name: "qwen", port: 8080 });
+    expect(exported.profiles[0]).not.toHaveProperty("id");
+    click.mockRestore();
+  });
+
+  it("asks how to handle existing profiles before importing", async () => {
+    profiles = [makeProfile()];
+    render(<App />);
+    await screen.findByText("qwen");
+    const document = {
+      format: "llm-cp-profiles",
+      version: 1,
+      profiles: [{ name: "qwen" }, { name: "gemma" }],
+    };
+    fireEvent.change(screen.getByTestId("import-file"), {
+      target: { files: [new File([JSON.stringify(document)], "profiles.json")] },
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Import profiles" });
+    expect(dialog).toHaveTextContent("1 of 2 profiles in this file already exist");
+    expect(calls.some((call) => call.path === "/profiles/import")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skip existing" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Import finished: 1 created, 1 skipped.",
+    );
+    const imported = calls.find((call) => call.path === "/profiles/import");
+    expect(imported?.body).toMatchObject({ profiles: [{ name: "qwen" }, { name: "gemma" }] });
+  });
+
+  it("rejects a file that is not a profile export", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: "Import profiles" });
+    fireEvent.change(screen.getByTestId("import-file"), {
+      target: { files: [new File(["{}"], "other.json")] },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Import: The file is not a profile export",
+    );
   });
 
   it("renders GPU meters from the stream", async () => {

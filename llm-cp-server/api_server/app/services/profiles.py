@@ -9,8 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_server.app.remote.engines import command_line, get_engine
 from api_server.app.remote.executor import RemoteUnavailableError
 from api_server.app.runtime import Runtime
-from api_server.app.schemas import ProfileCreate, ProfileRead, ProfileUpdate, RunStatus
-from common.db.models import Profile, Run
+from api_server.app.schemas import (
+    ImportConflict,
+    ImportResult,
+    ProfileCreate,
+    ProfileExport,
+    ProfileRead,
+    ProfileUpdate,
+    RunStatus,
+)
+from api_server.app.schemas.profiles import EXPORT_FORMAT, EXPORT_VERSION
+from common.db.models import Profile, Run, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -121,15 +130,19 @@ async def update_profile(
     return profile
 
 
+def _unused_name(name: str, label: str, names: set[str]) -> str:
+    candidate = f"{name} ({label})"
+    counter = 2
+    while candidate in names:
+        candidate = f"{name} ({label} {counter})"
+        counter += 1
+    return candidate
+
+
 async def duplicate_profile(session: AsyncSession, profile: Profile) -> Profile:
     names = set(await session.scalars(select(Profile.name)))
-    name = f"{profile.name} (copy)"
-    counter = 2
-    while name in names:
-        name = f"{profile.name} (copy {counter})"
-        counter += 1
     clone = Profile(
-        name=name,
+        name=_unused_name(profile.name, "copy", names),
         extra_args=list(profile.extra_args),
         env=dict(profile.env),
         **{field: getattr(profile, field) for field in COPIED_FIELDS},
@@ -137,6 +150,48 @@ async def duplicate_profile(session: AsyncSession, profile: Profile) -> Profile:
     session.add(clone)
     await session.flush()
     return clone
+
+
+async def export_profiles(session: AsyncSession, profile_ids: list[str] | None) -> ProfileExport:
+    query = select(Profile).order_by(Profile.name)
+    if profile_ids:
+        query = query.where(Profile.id.in_(profile_ids))
+    profiles = list(await session.scalars(query))
+    missing = set(profile_ids or ()) - {profile.id for profile in profiles}
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Profile not found: {sorted(missing)[0]}")
+    return ProfileExport(
+        format=EXPORT_FORMAT,
+        version=EXPORT_VERSION,
+        exported_at=utcnow(),
+        profiles=[ProfileCreate.model_validate(item, from_attributes=True) for item in profiles],
+    )
+
+
+async def import_profiles(
+    session: AsyncSession, document: ProfileExport, on_conflict: ImportConflict
+) -> ImportResult:
+    existing = {profile.name: profile for profile in await session.scalars(select(Profile))}
+    result = ImportResult(created=[], updated=[], skipped=[])
+    for payload in document.profiles:
+        values = payload.model_dump()
+        current = existing.get(payload.name)
+        if current is not None and on_conflict == "skip":
+            result.skipped.append(payload.name)
+            continue
+        if current is not None and on_conflict == "overwrite":
+            for key, value in values.items():
+                setattr(current, key, value)
+            result.updated.append(payload.name)
+            continue
+        if current is not None:
+            values["name"] = _unused_name(payload.name, "imported", set(existing))
+        profile = Profile(**values)
+        session.add(profile)
+        existing[profile.name] = profile
+        result.created.append(profile.name)
+    await session.flush()
+    return result
 
 
 async def delete_profile(session: AsyncSession, runtime: Runtime, profile: Profile) -> None:

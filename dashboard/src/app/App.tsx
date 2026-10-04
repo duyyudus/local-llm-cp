@@ -1,13 +1,20 @@
 import { Moon, Server, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type HostInfo, type Profile } from "../api";
+import {
+  api,
+  type HostInfo,
+  type ImportConflict,
+  type Profile,
+  type ProfileExport,
+} from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Logo } from "../components/Logo";
 import { StatusBadge } from "../components/StatusBadge";
 import { ConsolePanel } from "../features/console/ConsolePanel";
 import { GpuPanel } from "../features/gpu/GpuPanel";
 import { useGpuStream } from "../features/gpu/useGpuStream";
+import { ImportDialog } from "../features/profiles/ImportDialog";
 import { ProfileForm } from "../features/profiles/ProfileForm";
 import { ProfileList } from "../features/profiles/ProfileList";
 import {
@@ -17,6 +24,8 @@ import {
   type ProfileFormState,
 } from "../features/profiles/form";
 import { isActive } from "../features/profiles/status";
+import { exportFileName, importSummary, parseExport } from "../features/profiles/transfer";
+import { downloadJson } from "../lib/download";
 import { errorMessage } from "../lib/format";
 
 const PROFILE_POLL_MS = 2500;
@@ -26,6 +35,7 @@ const SIDEBAR_MAX = 720;
 
 type Confirm = { kind: "stop" | "delete"; profile: Profile };
 type Editor = { id: string | null; form: ProfileFormState };
+type PendingImport = { document: ProfileExport; conflicts: string[] };
 
 function storedNumber(key: string, fallback: number): number {
   const value = Number(localStorage.getItem(key));
@@ -38,6 +48,8 @@ export function App() {
   const [host, setHost] = useState<HostInfo | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -119,6 +131,43 @@ export function App() {
     void runAction(profile, () =>
       kind === "stop" ? api.stopProfile(profile.id) : api.deleteProfile(profile.id),
     );
+  }
+
+  async function exportProfiles(profile: Profile | null) {
+    setActionError(null);
+    try {
+      const document = await api.exportProfiles(profile ? [profile.id] : []);
+      downloadJson(exportFileName(profile), document);
+    } catch (reason) {
+      setActionError(`Export: ${errorMessage(reason)}`);
+    }
+  }
+
+  async function runImport(document: ProfileExport, onConflict: ImportConflict) {
+    setPendingImport(null);
+    try {
+      setNotice(importSummary(await api.importProfiles(document, onConflict)));
+    } catch (reason) {
+      setActionError(`Import: ${errorMessage(reason)}`);
+    } finally {
+      await loadProfiles();
+    }
+  }
+
+  async function chooseImport(file: File) {
+    setActionError(null);
+    setNotice(null);
+    try {
+      const document = parseExport(await file.text());
+      const names = new Set(profiles.map((profile) => profile.name));
+      const conflicts = document.profiles
+        .map((profile) => profile.name)
+        .filter((name) => names.has(name));
+      if (conflicts.length > 0) setPendingImport({ document, conflicts });
+      else await runImport(document, "skip");
+    } catch (reason) {
+      setActionError(`Import: ${errorMessage(reason)}`);
+    }
   }
 
   async function save() {
@@ -203,7 +252,7 @@ export function App() {
         </div>
       </header>
 
-      {apiError || actionError || (host && !host.connected && host.error) ? (
+      {apiError || actionError || notice || (host && !host.connected && host.error) ? (
         <div className="space-y-2 border-b border-zinc-800 bg-zinc-950 px-4 py-2">
           {apiError ? <div className="alert alert-error py-2 text-sm">{apiError}</div> : null}
           {host && !host.connected && host.error ? (
@@ -216,6 +265,19 @@ export function App() {
                 aria-label="Dismiss"
                 className="btn btn-xs btn-ghost"
                 onClick={() => setActionError(null)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="alert alert-success flex justify-between py-2 text-sm" role="status">
+              <span>{notice}</span>
+              <button
+                aria-label="Dismiss"
+                className="btn btn-xs btn-ghost"
+                onClick={() => setNotice(null)}
                 type="button"
               >
                 <X className="h-4 w-4" />
@@ -238,6 +300,8 @@ export function App() {
             onDelete={(profile) => setConfirm({ kind: "delete", profile })}
             onDuplicate={(profile) => void runAction(profile, () => api.duplicateProfile(profile.id))}
             onEdit={openEditor}
+            onExport={(profile) => void exportProfiles(profile)}
+            onImport={(file) => void chooseImport(file)}
             onSelect={(profile) => setSelectedId(profile.id)}
             onStart={start}
             onStop={(profile) => setConfirm({ kind: "stop", profile })}
@@ -269,6 +333,15 @@ export function App() {
           onSave={() => void save()}
           saving={saving}
           setForm={(form) => setEditor({ ...editor, form })}
+        />
+      ) : null}
+
+      {pendingImport ? (
+        <ImportDialog
+          conflicts={pendingImport.conflicts}
+          onCancel={() => setPendingImport(null)}
+          onImport={(onConflict) => void runImport(pendingImport.document, onConflict)}
+          total={pendingImport.document.profiles.length}
         />
       ) : null}
 

@@ -78,6 +78,87 @@ async def test_duplicate_profile(client) -> None:
     )
 
 
+async def test_export_profiles(client) -> None:
+    payload = profile_payload(
+        name="qwen", model_path="/models/qwen.gguf", extra_args=["--jinja"], env={"A": "1"}
+    )
+    qwen = (await client.post("/profiles", json=payload)).json()
+    await client.post("/profiles", json=profile_payload(name="gemma"))
+
+    exported = await client.get("/profiles/export")
+    assert exported.status_code == 200
+    assert "attachment" in exported.headers["content-disposition"]
+    document = exported.json()
+    assert (document["format"], document["version"]) == ("llm-cp-profiles", 1)
+    assert [item["name"] for item in document["profiles"]] == ["gemma", "qwen"]
+    # Only launch settings travel; ids, run state and timestamps stay behind.
+    assert document["profiles"][1] == {
+        "name": "qwen",
+        "engine": "llama.cpp",
+        "executable_path": payload["executable_path"],
+        "working_dir": None,
+        "model_path": "/models/qwen.gguf",
+        "alias": None,
+        "host": "127.0.0.1",
+        "port": payload["port"],
+        "ctx_size": None,
+        "n_gpu_layers": None,
+        "extra_args": ["--jinja"],
+        "env": {"A": "1"},
+        "notes": "",
+    }
+
+    single = (await client.get("/profiles/export", params={"id": qwen["id"]})).json()
+    assert [item["name"] for item in single["profiles"]] == ["qwen"]
+    assert (await client.get("/profiles/export", params={"id": "prf_nope"})).status_code == 404
+
+
+async def test_import_profiles(client) -> None:
+    await client.post("/profiles", json=profile_payload(name="qwen", port=9001))
+    document = (await client.get("/profiles/export")).json()
+    document["profiles"][0]["port"] = 9002
+    document["profiles"].append(profile_payload(name="gemma", port=9003))
+
+    skipped = (await client.post("/profiles/import", json=document)).json()
+    assert skipped == {"created": ["gemma"], "updated": [], "skipped": ["qwen"]}
+
+    renamed = await client.post("/profiles/import", json=document, params={"on_conflict": "rename"})
+    assert renamed.json() == {
+        "created": ["qwen (imported)", "gemma (imported)"],
+        "updated": [],
+        "skipped": [],
+    }
+
+    document["profiles"] = document["profiles"][:1]
+    overwritten = await client.post(
+        "/profiles/import", json=document, params={"on_conflict": "overwrite"}
+    )
+    assert overwritten.json() == {"created": [], "updated": ["qwen"], "skipped": []}
+    ports = {item["name"]: item["port"] for item in (await client.get("/profiles")).json()["items"]}
+    assert ports == {
+        "qwen": 9002,
+        "qwen (imported)": 9002,
+        "gemma": 9003,
+        "gemma (imported)": 9003,
+    }
+
+
+async def test_import_rejects_invalid_documents(client) -> None:
+    document = {
+        "format": "llm-cp-profiles",
+        "version": 1,
+        "profiles": [profile_payload(name="ok"), profile_payload(name="bad", port=70000)],
+    }
+    assert (await client.post("/profiles/import", json=document)).status_code == 422
+    # Nothing is imported when any profile in the file is invalid.
+    assert (await client.get("/profiles")).json()["total"] == 0
+    document["profiles"].pop()
+    newer = await client.post("/profiles/import", json={**document, "version": 2})
+    assert newer.status_code == 422
+    assert (await client.post("/profiles/import", json={"profiles": []})).status_code == 422
+    assert (await client.post("/profiles/import", json=document)).status_code == 200
+
+
 async def test_preview_command_and_validation(client) -> None:
     preview = await client.post(
         "/profiles/preview-command",

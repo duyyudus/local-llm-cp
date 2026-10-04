@@ -16,6 +16,10 @@ RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_lengt
 Host = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 
 RunState = Literal["stopped", "starting", "ready", "running", "exited", "unknown"]
+ImportConflict = Literal["skip", "rename", "overwrite"]
+
+EXPORT_FORMAT = "llm-cp-profiles"
+EXPORT_VERSION = 1
 
 
 def _validate_engine(value: str) -> str:
@@ -120,6 +124,19 @@ class ProfileRead(ProfileBase):
     run: RunStatus
     created_at: datetime
     updated_at: datetime
+
+
+class ProfileExport(BaseModel):
+    format: Literal["llm-cp-profiles"]
+    version: Literal[1]
+    exported_at: datetime | None = None
+    profiles: list[ProfileCreate]
+
+
+class ImportResult(BaseModel):
+    created: list[str]
+    updated: list[str]
+    skipped: list[str]
 
 
 class CommandPreview(BaseModel):

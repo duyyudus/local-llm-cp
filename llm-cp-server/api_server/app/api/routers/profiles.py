@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Response, status
 
 from api_server.app.api.dependencies import RuntimeDep, SessionDep
 from api_server.app.schemas import (
     CommandPreview,
+    ImportConflict,
+    ImportResult,
     ListEnvelope,
     ProfileCreate,
+    ProfileExport,
     ProfileRead,
     ProfileUpdate,
 )
@@ -33,6 +38,24 @@ async def create_profile(
 async def preview_command(payload: ProfileCreate) -> CommandPreview:
     argv = profile_service.build_argv(payload)
     return CommandPreview(command=profile_service.preview_command(payload), argv=argv)
+
+
+@router.get("/profiles/export", response_model=ProfileExport)
+async def export_profiles(
+    session: SessionDep,
+    response: Response,
+    profile_ids: Annotated[list[str] | None, Query(alias="id")] = None,
+) -> ProfileExport:
+    document = await profile_service.export_profiles(session, profile_ids)
+    response.headers["Content-Disposition"] = 'attachment; filename="llm-cp-profiles.json"'
+    return document
+
+
+@router.post("/profiles/import", response_model=ImportResult)
+async def import_profiles(
+    payload: ProfileExport, session: SessionDep, on_conflict: ImportConflict = "skip"
+) -> ImportResult:
+    return await profile_service.import_profiles(session, payload, on_conflict)
 
 
 @router.get("/profiles/{profile_id}", response_model=ProfileRead)

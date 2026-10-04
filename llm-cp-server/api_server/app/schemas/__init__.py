@@ -2,7 +2,10 @@ from api_server.app.schemas.common import ListEnvelope
 from api_server.app.schemas.host import DirEntryRead, DirListingRead, GpuRead, HostRead
 from api_server.app.schemas.profiles import (
     CommandPreview,
+    ImportConflict,
+    ImportResult,
     ProfileCreate,
+    ProfileExport,
     ProfileRead,
     ProfileUpdate,
     RunStatus,
@@ -14,8 +17,11 @@ __all__ = [
     "DirListingRead",
     "GpuRead",
     "HostRead",
+    "ImportConflict",
+    "ImportResult",
     "ListEnvelope",
     "ProfileCreate",
+    "ProfileExport",
     "ProfileRead",
     "ProfileUpdate",
     "RunStatus",
