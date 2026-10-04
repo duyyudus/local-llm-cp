@@ -1,0 +1,245 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { Profile } from "./api";
+import { App } from "./app/App";
+
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+  listeners: Record<string, ((event: MessageEvent) => void)[]> = {};
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+
+  constructor(public url: string) {
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+    (this.listeners[type] ??= []).push(listener);
+  }
+
+  emit(type: string, data: unknown) {
+    for (const listener of this.listeners[type] ?? []) {
+      listener({ data: JSON.stringify(data) } as MessageEvent);
+    }
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  static find(fragment: string): MockEventSource {
+    const match = MockEventSource.instances.filter(
+      (source) => source.url.includes(fragment) && !source.closed,
+    );
+    return match[match.length - 1];
+  }
+}
+
+function makeProfile(overrides: Partial<Profile> = {}): Profile {
+  return {
+    id: "prf_1",
+    name: "qwen",
+    engine: "llama.cpp",
+    executable_path: "/opt/llama-server",
+    working_dir: null,
+    model_path: "/models/qwen-coder.gguf",
+    alias: "qwen",
+    host: "0.0.0.0",
+    port: 8080,
+    ctx_size: 32768,
+    n_gpu_layers: null,
+    extra_args: [],
+    env: {},
+    notes: "",
+    command: "/opt/llama-server --model /models/qwen-coder.gguf",
+    run: { status: "stopped", pid: null, started_at: null, stopped_at: null, command_changed: false },
+    created_at: "2026-10-04T00:00:00Z",
+    updated_at: "2026-10-04T00:00:00Z",
+    ...overrides,
+  };
+}
+
+let profiles: Profile[] = [];
+const calls: { method: string; path: string; body?: unknown }[] = [];
+
+function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const path = new URL(String(input)).pathname;
+  const method = init?.method ?? "GET";
+  const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+  calls.push({ method, path, body });
+  const json = (data: unknown, status = 200) =>
+    Promise.resolve(new Response(JSON.stringify(data), { status }));
+
+  if (path === "/host") {
+    return json({ mode: "ssh", target: "me@gpu:22", connected: true, error: null, gpu_error: null });
+  }
+  if (path === "/profiles" && method === "GET") {
+    return json({ items: profiles, total: profiles.length });
+  }
+  if (path === "/profiles/preview-command") {
+    return json({ command: `${body.executable_path} --port ${body.port}`, argv: [] });
+  }
+  if (path === "/profiles" && method === "POST") {
+    profiles = [...profiles, makeProfile({ ...body, id: "prf_new" })];
+    return json(profiles[profiles.length - 1], 201);
+  }
+  if (path.endsWith("/start")) {
+    if (profiles[0].port === 9999) return json({ detail: "Port 9999 is in use" }, 409);
+    profiles = profiles.map((profile) => ({
+      ...profile,
+      run: { ...profile.run, status: "starting", pid: 4242, started_at: new Date().toISOString() },
+    }));
+    return json(profiles[0]);
+  }
+  if (path.endsWith("/stop")) {
+    profiles = profiles.map((profile) => ({
+      ...profile,
+      run: { ...profile.run, status: "stopped", pid: null },
+    }));
+    return json(profiles[0]);
+  }
+  return json({ detail: "not mocked" }, 404);
+}
+
+beforeEach(() => {
+  profiles = [];
+  calls.length = 0;
+  MockEventSource.instances = [];
+  localStorage.clear();
+  vi.stubGlobal("EventSource", MockEventSource);
+  vi.stubGlobal("fetch", vi.fn(mockFetch));
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+    window.setTimeout(() => callback(0), 0),
+  );
+  vi.stubGlobal("cancelAnimationFrame", (handle: number) => window.clearTimeout(handle));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("App", () => {
+  it("lists profiles with their settings and the host connection", async () => {
+    profiles = [makeProfile()];
+    render(<App />);
+    const row = (await screen.findByText("qwen")).closest("li")!;
+    expect(within(row).getByText("qwen-coder.gguf")).toBeInTheDocument();
+    expect(within(row).getByText("0.0.0.0:8080")).toBeInTheDocument();
+    expect(within(row).getByText("ctx 32768")).toBeInTheDocument();
+    expect(within(row).getByText("stopped")).toBeInTheDocument();
+    expect(await screen.findByText("me@gpu:22")).toBeInTheDocument();
+  });
+
+  it("starts a profile and streams its log into the console", async () => {
+    profiles = [makeProfile()];
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await waitFor(() => expect(screen.getAllByText("loading").length).toBeGreaterThan(0));
+    expect(calls.some((call) => call.path === "/profiles/prf_1/start")).toBe(true);
+
+    const source = MockEventSource.find("/profiles/prf_1/logs/stream");
+    act(() => {
+      source.emit("reset", {});
+      source.emit("lines", { lines: ["loading model", "server is listening"] });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("console-output")).toHaveTextContent(
+        "loading model server is listening",
+      ),
+    );
+    // A relaunch resets the view instead of appending to the old run's output.
+    act(() => {
+      source.emit("reset", {});
+      source.emit("lines", { lines: ["second launch"] });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("console-output")).toHaveTextContent(/^second launch$/),
+    );
+  });
+
+  it("asks for confirmation before stopping", async () => {
+    profiles = [
+      makeProfile({
+        run: {
+          status: "ready",
+          pid: 4242,
+          started_at: new Date().toISOString(),
+          stopped_at: null,
+          command_changed: true,
+        },
+      }),
+    ];
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(calls.some((call) => call.path.endsWith("/stop"))).toBe(false);
+    expect(screen.getByText("Edited since launch. Restart to apply.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop server" }));
+    await waitFor(() => expect(calls.some((call) => call.path.endsWith("/stop"))).toBe(true));
+    await screen.findByRole("button", { name: "Start" });
+  });
+
+  it("shows the backend error when a start is refused", async () => {
+    profiles = [makeProfile({ port: 9999 })];
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("qwen: Port 9999 is in use");
+  });
+
+  it("creates a profile from the form with a command preview", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New profile" }));
+    const create = screen.getByRole("button", { name: "Create profile" });
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "new one" } });
+    fireEvent.change(screen.getByPlaceholderText("/path/to/llama-server"), {
+      target: { value: "/opt/llama-server" },
+    });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "9001" } });
+    fireEvent.change(screen.getByLabelText("Extra arguments", { exact: false }), {
+      target: { value: "--jinja\n--parallel 2" },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("command-preview")).toHaveTextContent(
+        "/opt/llama-server --port 9001",
+      ),
+    );
+    fireEvent.click(create);
+    await screen.findByText("new one");
+    const created = calls.find((call) => call.method === "POST" && call.path === "/profiles");
+    expect(created?.body).toMatchObject({
+      name: "new one",
+      port: 9001,
+      model_path: null,
+      extra_args: ["--jinja", "--parallel 2"],
+    });
+  });
+
+  it("renders GPU meters from the stream", async () => {
+    render(<App />);
+    await screen.findByText("Waiting for GPU data", { exact: false }).catch(() => null);
+    const gpu = {
+      index: 0,
+      uuid: "GPU-a",
+      name: "NVIDIA GeForce RTX 3090",
+      memory_used_mb: 12288,
+      memory_total_mb: 24576,
+      utilization_pct: 87,
+      temperature_c: 71,
+      power_w: 312,
+      processes: [{ pid: 4242, used_mb: 11264, profile_id: "prf_1", profile_name: "qwen" }],
+    };
+    act(() => {
+      MockEventSource.find("/gpu/stream").emit("history", { snapshots: [{ ts: 1, gpus: [gpu] }] });
+    });
+    expect(screen.getByText("GeForce RTX 3090", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("12.0 / 24.0 GiB")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Compute 87%" })).toHaveAttribute(
+      "aria-valuenow",
+      "87",
+    );
+    expect(screen.getByText("11.0 GiB")).toBeInTheDocument();
+  });
+});

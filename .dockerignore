@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+dashboard/node_modules
+dashboard/dist
+llm-cp-server/.env
+llm-cp-server/data
