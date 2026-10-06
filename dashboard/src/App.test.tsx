@@ -1,4 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Profile } from "./api";
@@ -97,6 +106,10 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     });
   }
   if (path === "/profiles" && method === "GET") {
+    return json({ items: profiles, total: profiles.length });
+  }
+  if (path === "/profiles/order") {
+    profiles = (body.ids as string[]).map((id) => profiles.find((profile) => profile.id === id)!);
     return json({ items: profiles, total: profiles.length });
   }
   if (path === "/profiles/export") {
@@ -313,6 +326,41 @@ describe("App", () => {
       model_path: null,
       engine_options: { vram_mode: "lowvram", fast: true },
     });
+  });
+
+  it("reorders profiles by dragging or with the arrow keys", async () => {
+    profiles = ["a", "b", "c"].map((name) => makeProfile({ id: `prf_${name}`, name }));
+    const names = () =>
+      screen
+        .getAllByRole("button", { name: /^Reorder / })
+        .map((handle) => handle.getAttribute("aria-label")!.slice("Reorder ".length));
+    const orders = () =>
+      calls.filter((call) => call.path === "/profiles/order").map((call) => call.body);
+    render(<App />);
+    const handle = await screen.findByRole("button", { name: "Reorder a" });
+    const target = screen.getByText("c").closest("li")!;
+    target.getBoundingClientRect = () => ({ top: 100, height: 40 }) as DOMRect;
+    const dataTransfer = { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: "" };
+
+    fireEvent.dragStart(handle, { dataTransfer });
+    // jsdom has no DragEvent, so the pointer position has to be set by hand.
+    const over = createEvent.dragOver(target, { dataTransfer });
+    Object.defineProperty(over, "clientY", { value: 130 });
+    fireEvent(target, over);
+    expect(screen.getByTestId("drop-indicator")).toHaveClass("bottom-0");
+    fireEvent.drop(target, { dataTransfer });
+    fireEvent.dragEnd(handle, { dataTransfer });
+    // The list moves at once, without waiting for the API.
+    expect(names()).toEqual(["b", "c", "a"]);
+    expect(screen.queryByTestId("drop-indicator")).not.toBeInTheDocument();
+    await waitFor(() => expect(orders()).toEqual([{ ids: ["prf_b", "prf_c", "prf_a"] }]));
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Reorder c" }), { key: "ArrowUp" });
+    await waitFor(() => expect(orders()[1]).toEqual({ ids: ["prf_c", "prf_b", "prf_a"] }));
+    expect(names()).toEqual(["c", "b", "a"]);
+    // Nothing is sent for a move past either end of the list.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Reorder c" }), { key: "ArrowUp" });
+    expect(orders()).toHaveLength(2);
   });
 
   it("exports all profiles to a JSON download", async () => {

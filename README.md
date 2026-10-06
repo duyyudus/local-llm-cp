@@ -5,7 +5,8 @@ servers on a GPU machine. It replaces a folder of launch scripts and the two SSH
 (one for `llama-server`, one for `nvtop`) with one page:
 
 - **Profiles**: a saved server executable plus its arguments and environment variables.
-  Create, edit, duplicate, delete, start and stop. Export to and import from JSON.
+  Create, edit, duplicate, delete, start and stop. Drag to reorder. Export to and import
+  from JSON.
 - **Console**: the live log of each running server, as you would see it in a terminal.
 - **GPUs**: per-GPU VRAM and compute usage, temperature, power, and which running profile
   holds how much VRAM.

@@ -78,6 +78,31 @@ async def test_duplicate_profile(client) -> None:
     )
 
 
+async def test_reorder_profiles(client) -> None:
+    async def names() -> list[str]:
+        return [item["name"] for item in (await client.get("/profiles")).json()["items"]]
+
+    ids = {}
+    for name in ("c", "a", "b"):
+        ids[name] = (await client.post("/profiles", json=profile_payload(name=name))).json()["id"]
+    # New profiles go to the end rather than being sorted by name.
+    assert await names() == ["c", "a", "b"]
+
+    moved = await client.put("/profiles/order", json={"ids": [ids["b"], ids["c"], ids["a"]]})
+    assert moved.status_code == 200
+    assert [item["name"] for item in moved.json()["items"]] == ["b", "c", "a"]
+    assert await names() == ["b", "c", "a"]
+
+    # Profiles left out keep their order after the listed ones; unknown ids are ignored.
+    await client.put("/profiles/order", json={"ids": ["prf_nope", ids["a"]]})
+    assert await names() == ["a", "b", "c"]
+
+    await client.post(f"/profiles/{ids['a']}/duplicate")
+    assert await names() == ["a", "b", "c", "a (copy)"]
+    exported = (await client.get("/profiles/export")).json()
+    assert [item["name"] for item in exported["profiles"]] == ["a", "b", "c", "a (copy)"]
+
+
 async def test_export_profiles(client) -> None:
     payload = profile_payload(
         name="qwen", model_path="/models/qwen.gguf", extra_args=["--jinja"], env={"A": "1"}
@@ -90,9 +115,9 @@ async def test_export_profiles(client) -> None:
     assert "attachment" in exported.headers["content-disposition"]
     document = exported.json()
     assert (document["format"], document["version"]) == ("llm-cp-profiles", 1)
-    assert [item["name"] for item in document["profiles"]] == ["gemma", "qwen"]
+    assert [item["name"] for item in document["profiles"]] == ["qwen", "gemma"]
     # Only launch settings travel; ids, run state and timestamps stay behind.
-    assert document["profiles"][1] == {
+    assert document["profiles"][0] == {
         "name": "qwen",
         "engine": "llama.cpp",
         "executable_path": payload["executable_path"],

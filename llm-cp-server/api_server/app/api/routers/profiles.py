@@ -12,6 +12,7 @@ from api_server.app.schemas import (
     ListEnvelope,
     ProfileCreate,
     ProfileExport,
+    ProfileOrder,
     ProfileRead,
     ProfileUpdate,
 )
@@ -32,6 +33,15 @@ async def create_profile(
 ) -> ProfileRead:
     profile = await profile_service.create_profile(session, payload)
     return await profile_service.read_profile(session, runtime, profile)
+
+
+@router.put("/profiles/order", response_model=ListEnvelope[ProfileRead])
+async def reorder_profiles(
+    payload: ProfileOrder, session: SessionDep, runtime: RuntimeDep
+) -> ListEnvelope[ProfileRead]:
+    await profile_service.reorder_profiles(session, payload.ids)
+    items = await profile_service.list_profiles(session, runtime)
+    return ListEnvelope(items=items, total=len(items))
 
 
 @router.post("/profiles/preview-command", response_model=CommandPreview)

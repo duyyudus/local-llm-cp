@@ -138,6 +138,10 @@ class ProfileRead(ProfileBase):
     updated_at: datetime
 
 
+class ProfileOrder(BaseModel):
+    ids: list[str]
+
+
 class ProfileExport(BaseModel):
     format: Literal["llm-cp-profiles"]
     version: Literal[1]

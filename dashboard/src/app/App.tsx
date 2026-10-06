@@ -62,6 +62,7 @@ export function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("llm-cp-theme") ?? "dark");
   const [sidebarWidth, setSidebarWidth] = useState(() => storedNumber("llm-cp-sidebar", 420));
   const dragging = useRef(false);
+  const orderVersion = useRef(0);
   const metrics = useMetricsStream();
 
   useEffect(() => {
@@ -72,9 +73,11 @@ export function App() {
   }, [theme]);
 
   const loadProfiles = useCallback(async () => {
+    const version = orderVersion.current;
     try {
       const result = await api.profiles();
-      setProfiles(result.items);
+      // A poll that started before a reorder still carries the old order.
+      if (version === orderVersion.current) setProfiles(result.items);
       setApiError(null);
     } catch (reason) {
       setApiError(`Cannot reach the API: ${errorMessage(reason)}`);
@@ -146,6 +149,21 @@ export function App() {
       setActionError(`Shutdown: ${errorMessage(reason)}`);
     } finally {
       setShuttingDown(false);
+    }
+  }
+
+  async function reorder(ids: string[]) {
+    orderVersion.current += 1;
+    const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+    setProfiles(ids.flatMap((id) => byId.get(id) ?? []));
+    setActionError(null);
+    try {
+      await api.reorderProfiles(ids);
+    } catch (reason) {
+      setActionError(`Reorder: ${errorMessage(reason)}`);
+    } finally {
+      orderVersion.current += 1;
+      await loadProfiles();
     }
   }
 
@@ -328,6 +346,7 @@ export function App() {
             onEdit={openEditor}
             onExport={(profile) => void exportProfiles(profile)}
             onImport={(file) => void chooseImport(file)}
+            onReorder={(ids) => void reorder(ids)}
             onSelect={(profile) => setSelectedId(profile.id)}
             onStart={start}
             onStop={(profile) => setConfirm({ kind: "stop", profile })}

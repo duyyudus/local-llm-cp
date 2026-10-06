@@ -165,6 +165,11 @@ export const api = {
   deleteProfile: (id: string) => request<void>(`/profiles/${id}`, { method: "DELETE" }),
   duplicateProfile: (id: string) =>
     request<Profile>(`/profiles/${id}/duplicate`, { method: "POST" }),
+  reorderProfiles: (ids: string[]) =>
+    request<ListEnvelope<Profile>>("/profiles/order", {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
+    }),
   exportProfiles: (ids: string[]) =>
     request<ProfileExport>(
       `/profiles/export?${ids.map((id) => `id=${encodeURIComponent(id)}`).join("&")}`,

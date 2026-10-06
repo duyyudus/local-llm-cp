@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_server.app.remote.engines import command_line, get_engine
@@ -35,6 +35,9 @@ COPIED_FIELDS = (
     "n_gpu_layers",
     "notes",
 )
+
+
+DISPLAY_ORDER = (Profile.position, Profile.name)
 
 
 def build_argv(profile) -> list[str]:
@@ -89,7 +92,7 @@ async def read_profile(session: AsyncSession, runtime: Runtime, profile: Profile
 
 
 async def list_profiles(session: AsyncSession, runtime: Runtime) -> list[ProfileRead]:
-    profiles = list(await session.scalars(select(Profile).order_by(Profile.name)))
+    profiles = list(await session.scalars(select(Profile).order_by(*DISPLAY_ORDER)))
     runs = await latest_runs(session, [profile.id for profile in profiles])
     return [to_read(profile, runs.get(profile.id), runtime) for profile in profiles]
 
@@ -107,9 +110,14 @@ async def _ensure_name_free(session: AsyncSession, name: str, exclude_id: str | 
         raise HTTPException(status_code=409, detail=f"A profile named '{name}' already exists")
 
 
+async def _next_position(session: AsyncSession) -> int:
+    last = await session.scalar(select(func.max(Profile.position)))
+    return 0 if last is None else last + 1
+
+
 async def create_profile(session: AsyncSession, payload: ProfileCreate) -> Profile:
     await _ensure_name_free(session, payload.name, None)
-    profile = Profile(**payload.model_dump())
+    profile = Profile(**payload.model_dump(), position=await _next_position(session))
     session.add(profile)
     await session.flush()
     return profile
@@ -151,6 +159,7 @@ async def duplicate_profile(session: AsyncSession, profile: Profile) -> Profile:
         engine_options=dict(profile.engine_options),
         extra_args=list(profile.extra_args),
         env=dict(profile.env),
+        position=await _next_position(session),
         **{field: getattr(profile, field) for field in COPIED_FIELDS},
     )
     session.add(clone)
@@ -158,8 +167,20 @@ async def duplicate_profile(session: AsyncSession, profile: Profile) -> Profile:
     return clone
 
 
+async def reorder_profiles(session: AsyncSession, profile_ids: list[str]) -> None:
+    profiles = list(await session.scalars(select(Profile).order_by(*DISPLAY_ORDER)))
+    by_id = {profile.id: profile for profile in profiles}
+    # Ids the caller did not know about, or no longer exist, must not fail the whole move.
+    listed = [profile_id for profile_id in dict.fromkeys(profile_ids) if profile_id in by_id]
+    ordered = [by_id[profile_id] for profile_id in listed]
+    ordered += [profile for profile in profiles if profile.id not in listed]
+    for position, profile in enumerate(ordered):
+        profile.position = position
+    await session.flush()
+
+
 async def export_profiles(session: AsyncSession, profile_ids: list[str] | None) -> ProfileExport:
-    query = select(Profile).order_by(Profile.name)
+    query = select(Profile).order_by(*DISPLAY_ORDER)
     if profile_ids:
         query = query.where(Profile.id.in_(profile_ids))
     profiles = list(await session.scalars(query))
@@ -179,6 +200,7 @@ async def import_profiles(
 ) -> ImportResult:
     existing = {profile.name: profile for profile in await session.scalars(select(Profile))}
     result = ImportResult(created=[], updated=[], skipped=[])
+    position = await _next_position(session)
     for payload in document.profiles:
         values = payload.model_dump()
         current = existing.get(payload.name)
@@ -192,7 +214,8 @@ async def import_profiles(
             continue
         if current is not None:
             values["name"] = _unused_name(payload.name, "imported", set(existing))
-        profile = Profile(**values)
+        profile = Profile(**values, position=position)
+        position += 1
         session.add(profile)
         existing[profile.name] = profile
         result.created.append(profile.name)
