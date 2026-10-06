@@ -1,5 +1,5 @@
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "../../api";
 import { Select } from "../../components/Select";
@@ -51,6 +51,14 @@ export function ProfileForm({
 }) {
   const [picker, setPicker] = useState<Picker | null>(null);
   const [preview, setPreview] = useState("");
+  const extraArgsRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fit the arguments to their text once on open; later resizing is left to the user.
+  useLayoutEffect(() => {
+    const area = extraArgsRef.current;
+    if (!area) return;
+    area.style.height = `${area.scrollHeight + area.offsetHeight - area.clientHeight}px`;
+  }, []);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const invalid = validateForm(form);
   const comfyui = form.engine === "comfyui";
@@ -277,10 +285,14 @@ export function ProfileForm({
   );
 
   return (
-    <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-label="Profile editor">
+    <div
+      className="fixed inset-0 z-30 flex justify-end lg:justify-start lg:pl-[calc(var(--sidebar)+0.25rem)]"
+      role="dialog"
+      aria-label="Profile editor"
+    >
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} />
       <form
-        className="relative flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl"
+        className="relative flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 lg:border-l-0 lg:border-r bg-zinc-900 shadow-2xl"
         onSubmit={(event) => {
           event.preventDefault();
           onSave();
@@ -318,9 +330,10 @@ export function ProfileForm({
           <label className="form-control">
             <span className="label-text">Extra arguments</span>
             <textarea
-              className="textarea textarea-bordered h-32 font-mono text-xs leading-5"
+              className="textarea textarea-bordered h-32 min-h-32 font-mono text-xs leading-5"
               onChange={(event) => update("extra_args", event.target.value)}
               placeholder={EXTRA_ARGS_PLACEHOLDER[form.engine]}
+              ref={extraArgsRef}
               spellCheck={false}
               value={form.extra_args}
             />

@@ -251,6 +251,7 @@ export function App() {
     <div
       className="flex min-h-screen flex-col bg-base-100 text-base-content lg:h-screen"
       data-testid="dashboard-root"
+      style={{ "--sidebar": `${sidebarWidth}px` } as React.CSSProperties}
     >
       <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-2">
         <div className="flex items-center gap-3">
@@ -331,10 +332,7 @@ export function App() {
         </div>
       ) : null}
 
-      <div
-        className="flex min-h-0 flex-1 flex-col lg:flex-row"
-        style={{ "--sidebar": `${sidebarWidth}px` } as React.CSSProperties}
-      >
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside className="flex max-h-[50vh] shrink-0 flex-col overflow-hidden border-b border-zinc-800 bg-zinc-900/40 lg:max-h-none lg:w-[var(--sidebar)] lg:border-b-0">
           <ProfileList
             busyId={busyId}
