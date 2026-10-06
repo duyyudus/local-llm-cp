@@ -57,6 +57,13 @@ from an existing script can be pasted as they are:
 Use the `CUDA_VISIBLE_DEVICES` environment variable to pin a profile to specific GPUs. The
 form shows the exact command that will be run.
 
+A profile's **Engine** decides what is launched. Besides llama.cpp there is **ComfyUI**: pick
+the ComfyUI repository folder instead of an executable and the server is started there as
+`uv run main.py`, using the environment already installed in that folder. Its form offers the
+common ComfyUI flags (VRAM mode, preview method, reserved VRAM, output, input and model path
+config, and a few switches); the rest goes in **Extra arguments** as before. **uv executable**
+defaults to `~/.local/bin/uv`; change it if uv is installed elsewhere on the GPU host.
+
 Several profiles can run at once as long as their ports differ. Editing a running profile
 takes effect at its next start.
 

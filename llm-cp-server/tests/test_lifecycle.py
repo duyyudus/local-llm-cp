@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -176,6 +177,44 @@ async def test_server_runs_in_its_working_directory(client, tmp_path) -> None:
     response = await client.post(f"/profiles/{missing['id']}/start")
     assert response.status_code == 502
     assert "nope" in response.json()["detail"]
+
+
+async def test_comfyui_runs_behind_its_launcher(
+    client, runtime: Runtime, tmp_path, monkeypatch
+) -> None:
+    repo = tmp_path / "ComfyUI"
+    repo.mkdir()
+    (repo / "main.py").write_text(Path(STUB_SERVER).read_text())
+    # Like uv, the launcher stays alive as the parent of the Python process.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    launcher = tmp_path / ".local" / "bin" / "uv"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text(f'#!/bin/sh\nshift\n{sys.executable} "$@"\n')
+    launcher.chmod(0o755)
+
+    profile = await create_and_start(
+        client,
+        engine="comfyui",
+        executable_path="~/.local/bin/uv",
+        working_dir=str(repo),
+        engine_options={"vram_mode": "lowvram"},
+    )
+    pid = profile["run"]["pid"]
+    children = Path(f"/proc/{pid}/task/{pid}/children")
+    await wait_for(lambda: children.read_text().split())
+    child = int(children.read_text().split()[0])
+    assert os.readlink(f"/proc/{child}/cwd") == str(repo)
+
+    async def ready() -> bool:
+        return await status_of(client, runtime, profile["id"]) == "ready"
+
+    await wait_for(ready)
+    channel = runtime.logs.channel(profile["id"])
+    await wait_for(lambda: "extra args: ['--lowvram']" in channel.since(0)[0])
+
+    assert (await client.post(f"/profiles/{profile['id']}/stop")).status_code == 200
+    assert not is_alive(pid)
+    await wait_for(lambda: not is_alive(child))
 
 
 async def test_missing_executable_is_rejected(client) -> None:

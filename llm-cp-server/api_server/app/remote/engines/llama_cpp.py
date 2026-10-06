@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import posixpath
 import shlex
-from typing import Protocol
+from typing import Any, Protocol
 
 LOOPBACK_FOR_WILDCARD = {"", "0.0.0.0", "::", "[::]", "*"}
 
@@ -16,6 +16,7 @@ class ProfileLike(Protocol):
     port: int
     ctx_size: int | None
     n_gpu_layers: int | None
+    engine_options: dict[str, Any]
     extra_args: list[str]
 
 
@@ -30,6 +31,12 @@ def split_extra_args(lines: list[str]) -> list[str]:
             continue
         tokens.extend(shlex.split(text))
     return tokens
+
+
+def validate(profile: ProfileLike) -> None:
+    if profile.engine_options:
+        unknown = ", ".join(sorted(profile.engine_options))
+        raise ValueError(f"llama.cpp has no engine options, got: {unknown}")
 
 
 def build_argv(profile: ProfileLike) -> list[str]:

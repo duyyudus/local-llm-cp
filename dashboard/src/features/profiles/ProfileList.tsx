@@ -119,7 +119,9 @@ export function ProfileList({
                     <RunStatusBadge status={profile.run.status} />
                   </div>
                   <div className="mt-1 truncate font-mono text-xs text-zinc-400">
-                    {baseName(profile.model_path) || baseName(profile.executable_path)}
+                    {profile.engine === "comfyui"
+                      ? baseName(profile.working_dir)
+                      : baseName(profile.model_path) || baseName(profile.executable_path)}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-500">
                     <span className="font-mono">

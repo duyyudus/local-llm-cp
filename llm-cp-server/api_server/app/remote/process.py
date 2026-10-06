@@ -4,7 +4,7 @@ import re
 import shlex
 from dataclasses import dataclass
 
-from api_server.app.remote.engines import quote_path
+from api_server.app.remote.engines import join_argv, quote_path
 from api_server.app.remote.executor import RemoteExecutor, bash
 from common.config import Settings
 
@@ -32,7 +32,12 @@ class Probe:
 
 def process_matches(command: list[str], cmdline: str) -> bool:
     """Guard against PID reuse: the live process must still be the one we launched."""
-    return bool(command) and command[0] in cmdline
+    if not command:
+        return False
+    # The arguments count too: a launcher such as `uv` is too common a name to identify a run.
+    # The host shows a leading ~ expanded to the home directory.
+    executable = command[0][1:] if command[0].startswith("~/") else command[0]
+    return executable in cmdline and " ".join(command[1:]).strip() in cmdline
 
 
 class ProcessManager:
@@ -54,7 +59,7 @@ class ProcessManager:
 
     async def executable_exists(self, executable: str) -> bool:
         result = await self._executor.run(
-            bash(f"command -v -- {shlex.quote(executable)} >/dev/null 2>&1")
+            bash(f"command -v -- {quote_path(executable)} >/dev/null 2>&1")
         )
         return result.ok
 
@@ -80,7 +85,7 @@ if [ -s "$log" ]; then
 fi
 : > "$log"
 {change_dir}
-setsid nohup env {assignments} {shlex.join(argv)} >> "$log" 2>&1 < /dev/null &
+setsid nohup env {assignments} {join_argv(argv)} >> "$log" 2>&1 < /dev/null &
 echo $!
 """
         result = await self._executor.run(bash(script), timeout=30)

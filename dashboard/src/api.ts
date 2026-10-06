@@ -27,6 +27,8 @@ export type RunStatus = {
   command_changed: boolean;
 };
 
+export type EngineOptions = Record<string, string | number | boolean>;
+
 export type ProfilePayload = {
   name: string;
   engine: string;
@@ -38,6 +40,7 @@ export type ProfilePayload = {
   port: number;
   ctx_size: number | null;
   n_gpu_layers: number | null;
+  engine_options: EngineOptions;
   extra_args: string[];
   env: Record<string, string>;
   notes: string;

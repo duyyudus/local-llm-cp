@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
@@ -53,6 +54,7 @@ class Profile(Base):
     port: Mapped[int] = mapped_column(Integer, default=8080)
     ctx_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_gpu_layers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    engine_options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     extra_args: Mapped[list[str]] = mapped_column(JSON, default=list)
     env: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     notes: Mapped[str] = mapped_column(Text, default="")

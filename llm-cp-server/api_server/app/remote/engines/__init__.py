@@ -3,9 +3,9 @@ from __future__ import annotations
 import shlex
 from types import ModuleType
 
-from api_server.app.remote.engines import llama_cpp
+from api_server.app.remote.engines import comfyui, llama_cpp
 
-ENGINES: dict[str, ModuleType] = {"llama.cpp": llama_cpp}
+ENGINES: dict[str, ModuleType] = {"llama.cpp": llama_cpp, "comfyui": comfyui}
 DEFAULT_ENGINE = "llama.cpp"
 
 
@@ -26,7 +26,12 @@ def quote_path(path: str) -> str:
     return shlex.quote(path)
 
 
+def join_argv(argv: list[str]) -> str:
+    """Quote a command for the remote shell; only the executable may start with ~."""
+    return " ".join([quote_path(argv[0]), *(shlex.quote(arg) for arg in argv[1:])])
+
+
 def command_line(argv: list[str], env: dict[str, str], cwd: str | None = None) -> str:
     assignments = [f"{key}={shlex.quote(value)}" for key, value in env.items()]
-    command = " ".join([*assignments, shlex.join(argv)])
+    command = " ".join([*assignments, join_argv(argv)])
     return f"cd {quote_path(cwd)} && {command}" if cwd else command

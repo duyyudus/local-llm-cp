@@ -50,6 +50,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     port: 8080,
     ctx_size: 32768,
     n_gpu_layers: null,
+    engine_options: {},
     extra_args: [],
     env: {},
     notes: "",
@@ -84,6 +85,16 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   }
   if (path === "/host/shutdown") {
     return Promise.resolve(new Response(null, { status: 204 }));
+  }
+  if (path === "/host/browse") {
+    return json({
+      path: "/srv/ComfyUI",
+      parent: "/srv",
+      entries: [
+        { name: "models", is_dir: true, size: null },
+        { name: "main.py", is_dir: false, size: 1024 },
+      ],
+    });
   }
   if (path === "/profiles" && method === "GET") {
     return json({ items: profiles, total: profiles.length });
@@ -253,6 +264,54 @@ describe("App", () => {
       port: 9001,
       model_path: null,
       extra_args: ["--jinja", "--parallel 2"],
+    });
+  });
+
+  it("creates a ComfyUI profile from a repository folder", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New profile" }));
+    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "comfy" } });
+    fireEvent.click(screen.getByLabelText("Engine"));
+    fireEvent.click(screen.getByRole("option", { name: "ComfyUI" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model path")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Port")).toHaveValue("8188");
+    expect(screen.getByLabelText("uv executable")).toHaveValue("");
+    const create = screen.getByRole("button", { name: "Create profile" });
+    expect(create).toBeDisabled();
+
+    const directory = screen.getByPlaceholderText("/path/to/ComfyUI");
+    fireEvent.click(within(directory.parentElement as HTMLElement).getByText("Browse"));
+    const picker = await screen.findByRole("dialog", { name: "Choose the ComfyUI repository" });
+    // Only folders can be picked, so the files in one are not selectable.
+    expect((await within(picker).findByText("main.py")).closest("button")).toBeDisabled();
+    fireEvent.click(within(picker).getByRole("button", { name: "Use this folder" }));
+    expect(directory).toHaveValue("/srv/ComfyUI");
+
+    fireEvent.click(screen.getByLabelText("VRAM mode"));
+    fireEvent.click(screen.getByRole("option", { name: "--lowvram" }));
+    expect(screen.getByLabelText("VRAM mode")).toHaveTextContent("--lowvram");
+    fireEvent.click(screen.getByLabelText("--fast"));
+    expect(screen.getByLabelText("--enable-manager").closest("label")).toHaveAttribute(
+      "title",
+      "Turn on ComfyUI-Manager",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("command-preview")).toHaveTextContent(
+        "~/.local/bin/uv --port 8188",
+      ),
+    );
+    fireEvent.click(create);
+    await screen.findByText("comfy");
+    const created = calls.find((call) => call.method === "POST" && call.path === "/profiles");
+    expect(created?.body).toMatchObject({
+      name: "comfy",
+      engine: "comfyui",
+      executable_path: "~/.local/bin/uv",
+      working_dir: "/srv/ComfyUI",
+      port: 8188,
+      model_path: null,
+      engine_options: { vram_mode: "lowvram", fast: true },
     });
   });
 

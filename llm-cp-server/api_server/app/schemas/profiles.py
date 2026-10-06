@@ -3,9 +3,16 @@ from __future__ import annotations
 import re
 import shlex
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from api_server.app.remote.engines import DEFAULT_ENGINE, get_engine
 
@@ -60,6 +67,7 @@ class ProfileBase(BaseModel):
     port: int = Field(default=8080, ge=1, le=65535)
     ctx_size: int | None = Field(default=None, ge=0)
     n_gpu_layers: int | None = Field(default=None, ge=-1)
+    engine_options: dict[str, Any] = Field(default_factory=dict)
     extra_args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     notes: str = ""
@@ -71,7 +79,10 @@ class ProfileBase(BaseModel):
 
 
 class ProfileCreate(ProfileBase):
-    pass
+    @model_validator(mode="after")
+    def validate_for_engine(self) -> Self:
+        get_engine(self.engine).validate(self)
+        return self
 
 
 class ProfileUpdate(BaseModel):
@@ -85,6 +96,7 @@ class ProfileUpdate(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     ctx_size: int | None = Field(default=None, ge=0)
     n_gpu_layers: int | None = Field(default=None, ge=-1)
+    engine_options: dict[str, Any] | None = None
     extra_args: list[str] | None = None
     env: dict[str, str] | None = None
     notes: str | None = None

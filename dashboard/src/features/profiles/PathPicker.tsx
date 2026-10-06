@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type DirListing } from "../../api";
 import { errorMessage, formatBytes } from "../../lib/format";
 
-function startDirectory(value: string): string {
+function startDirectory(value: string, directory: boolean): string {
+  if (directory) return value.trim() || "~";
   const index = value.lastIndexOf("/");
   return index > 0 ? value.slice(0, index) : "~";
 }
@@ -12,16 +13,19 @@ function startDirectory(value: string): string {
 export function PathPicker({
   title,
   initialValue,
+  directory = false,
   onSelect,
   onCancel,
 }: {
   title: string;
   initialValue: string;
+  /** Pick the folder being browsed instead of a file inside it. */
+  directory?: boolean;
   onSelect: (path: string) => void;
   onCancel: () => void;
 }) {
   const [listing, setListing] = useState<DirListing | null>(null);
-  const [pathInput, setPathInput] = useState(startDirectory(initialValue));
+  const [pathInput, setPathInput] = useState(startDirectory(initialValue, directory));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -40,8 +44,8 @@ export function PathPicker({
   }, []);
 
   useEffect(() => {
-    void load(startDirectory(initialValue));
-  }, [initialValue, load]);
+    void load(startDirectory(initialValue, directory));
+  }, [directory, initialValue, load]);
 
   const join = (name: string) => `${listing?.path === "/" ? "" : listing?.path}/${name}`;
 
@@ -83,7 +87,8 @@ export function PathPicker({
           {listing?.entries.map((entry) => (
             <li key={entry.name}>
               <button
-                className="flex w-full items-center gap-2 px-5 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800/60"
+                className="flex w-full items-center gap-2 px-5 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800/60 disabled:opacity-40 disabled:hover:bg-transparent"
+                disabled={directory && !entry.is_dir}
                 onClick={() =>
                   entry.is_dir ? void load(join(entry.name)) : onSelect(join(entry.name))
                 }
@@ -103,10 +108,20 @@ export function PathPicker({
             <li className="px-5 py-6 text-center text-sm text-zinc-500">Empty folder</li>
           ) : null}
         </ul>
-        <div className="flex justify-end border-t border-zinc-800 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
           <button className="btn btn-sm btn-ghost" onClick={onCancel} type="button">
             Cancel
           </button>
+          {directory ? (
+            <button
+              className="btn btn-sm btn-primary"
+              disabled={!listing}
+              onClick={() => listing && onSelect(listing.path)}
+              type="button"
+            >
+              Use this folder
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="modal-backdrop" onClick={onCancel} />

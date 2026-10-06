@@ -126,6 +126,11 @@ async def update_profile(
         await _ensure_name_free(session, changes["name"], profile.id)
     for key, value in changes.items():
         setattr(profile, key, value)
+    # A partial update can only be checked against the engine once it is applied.
+    try:
+        get_engine(profile.engine).validate(profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.flush()
     return profile
 
@@ -143,6 +148,7 @@ async def duplicate_profile(session: AsyncSession, profile: Profile) -> Profile:
     names = set(await session.scalars(select(Profile.name)))
     clone = Profile(
         name=_unused_name(profile.name, "copy", names),
+        engine_options=dict(profile.engine_options),
         extra_args=list(profile.extra_args),
         env=dict(profile.env),
         **{field: getattr(profile, field) for field in COPIED_FIELDS},

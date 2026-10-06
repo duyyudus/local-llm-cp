@@ -78,7 +78,9 @@ Docker, from the repository root:
 - For React work, follow the feature/component layout, reuse `dashboard/src/components`,
   keep API types in `dashboard/src/api.ts`, and use lucide icons for icon buttons.
 - New inference engines are added as a module in `api_server/app/remote/engines/` exposing
-  `build_argv` and `health_url`, registered in `engines/__init__.py`.
+  `validate`, `build_argv`, `working_dir` and `health_url`, registered in
+  `engines/__init__.py`. Settings only one engine has live in the profile's `engine_options`
+  JSON, as in `comfyui.py`.
 
 ## Testing Guidance
 

@@ -103,6 +103,7 @@ async def test_export_profiles(client) -> None:
         "port": payload["port"],
         "ctx_size": None,
         "n_gpu_layers": None,
+        "engine_options": {},
         "extra_args": ["--jinja"],
         "env": {"A": "1"},
         "notes": "",
@@ -198,3 +199,36 @@ async def test_host_shutdown(client, runtime, tmp_path: Path) -> None:
     refused = await client.post("/host/shutdown")
     assert refused.status_code == 502
     assert refused.json()["detail"] == "Shutdown command failed: sudo: a password is required"
+
+
+async def test_comfyui_profile_validation(client) -> None:
+    payload = profile_payload(
+        name="comfy",
+        engine="comfyui",
+        executable_path="uv",
+        working_dir="/srv/ComfyUI",
+        port=8188,
+        engine_options={"vram_mode": "lowvram", "fast": True},
+    )
+    created = await client.post("/profiles", json=payload)
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    assert profile["command"] == (
+        "cd /srv/ComfyUI && uv run main.py --listen 127.0.0.1 --port 8188 --lowvram --fast"
+    )
+    clone = (await client.post(f"/profiles/{profile['id']}/duplicate")).json()
+    assert clone["engine_options"] == {"vram_mode": "lowvram", "fast": True}
+
+    for bad in ({"working_dir": None}, {"engine_options": {"vram_mode": "turbo"}}):
+        invalid = await client.post("/profiles", json={**payload, "name": "x", **bad})
+        assert invalid.status_code == 422
+    rejected = await client.patch(f"/profiles/{profile['id']}", json={"working_dir": ""})
+    assert rejected.status_code == 422
+    assert "repository directory" in rejected.json()["detail"]
+    # Options of one engine do not carry over to another.
+    rejected = await client.patch(f"/profiles/{profile['id']}", json={"engine": "llama.cpp"})
+    assert rejected.status_code == 422
+    switched = await client.patch(
+        f"/profiles/{profile['id']}", json={"engine": "llama.cpp", "engine_options": {}}
+    )
+    assert switched.status_code == 200
