@@ -226,6 +226,25 @@ async def test_host_shutdown(client, runtime, tmp_path: Path) -> None:
     assert refused.json()["detail"] == "Shutdown command failed: sudo: a password is required"
 
 
+async def test_tabbyapi_profile_command(client) -> None:
+    payload = profile_payload(
+        name="tabby",
+        engine="tabbyapi",
+        executable_path="start.sh",
+        working_dir="/srv/tabbyAPI",
+        port=5000,
+        engine_options={"config": "/srv/configs/qwen.yml"},
+    )
+    created = await client.post("/profiles", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["command"] == (
+        "cd /srv/tabbyAPI && /srv/tabbyAPI/start.sh --config /srv/configs/qwen.yml"
+        " --host 127.0.0.1 --port 5000"
+    )
+    invalid = await client.post("/profiles", json={**payload, "name": "x", "working_dir": None})
+    assert invalid.status_code == 422
+
+
 async def test_comfyui_profile_validation(client) -> None:
     payload = profile_payload(
         name="comfy",

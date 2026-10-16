@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from api_server.app.api.dependencies import RuntimeDep, SessionDep
+from api_server.app.remote.engines import read_defaults
 from api_server.app.schemas import (
     CommandPreview,
+    EngineDefaultsQuery,
     ImportConflict,
     ImportResult,
     ListEnvelope,
@@ -48,6 +50,17 @@ async def reorder_profiles(
 async def preview_command(payload: ProfileCreate) -> CommandPreview:
     argv = profile_service.build_argv(payload)
     return CommandPreview(command=profile_service.preview_command(payload), argv=argv)
+
+
+@router.post("/profiles/engine-defaults", response_model=dict[str, Any] | None)
+async def engine_defaults(
+    payload: EngineDefaultsQuery, runtime: RuntimeDep
+) -> dict[str, Any] | None:
+    """What the engine's own config files give the settings a profile leaves empty."""
+    try:
+        return await read_defaults(runtime.executor, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/profiles/export", response_model=ProfileExport)

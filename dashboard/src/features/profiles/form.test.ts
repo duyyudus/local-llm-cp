@@ -122,6 +122,55 @@ describe("profile form", () => {
     expect(validateForm({ ...valid, ctx_size: "8k" })).toBeNull();
   });
 
+  it("builds a tabbyAPI payload from its repository, config file and overrides", () => {
+    const form = {
+      ...withEngine({ ...emptyForm, name: "tabby", ctx_size: "4096" }, "tabbyapi"),
+      working_dir: "/srv/tabbyAPI",
+      host: "0.0.0.0",
+      port: "8001",
+    };
+    // Host and port start empty so the repository's config can fill them in.
+    expect(withEngine(emptyForm, "tabbyapi")).toMatchObject({ host: "", port: "" });
+    expect(withEngine(withEngine(emptyForm, "tabbyapi"), "llama.cpp")).toMatchObject({
+      host: "0.0.0.0",
+      port: "8080",
+    });
+    expect(validateForm({ ...form, working_dir: "" })).toBe("tabbyAPI directory is required");
+    expect(validateForm(form)).toBeNull();
+    expect(payloadFromForm(form)).toMatchObject({
+      engine: "tabbyapi",
+      executable_path: "start.sh",
+      ctx_size: null,
+      engine_options: {},
+    });
+
+    const tabby = {
+      config: " /srv/configs/qwen.yml ",
+      model_name: " GLM-5.3-Flash-exl3 ",
+      max_seq_len: "-1",
+      gpu_split: "20, 23.5 24",
+    };
+    const payload = payloadFromForm({ ...form, tabby });
+    expect(payload.engine_options).toEqual({
+      config: "/srv/configs/qwen.yml",
+      model_name: "GLM-5.3-Flash-exl3",
+      max_seq_len: -1,
+      gpu_split: [20, 23.5, 24],
+    });
+    expect(formFromProfile({ ...profile, ...payload }).tabby).toEqual({
+      config: "/srv/configs/qwen.yml",
+      model_name: "GLM-5.3-Flash-exl3",
+      max_seq_len: "-1",
+      gpu_split: "20, 23.5, 24",
+    });
+    expect(validateForm({ ...form, tabby: { ...tabby, max_seq_len: "-2" } })).toMatch(
+      /Max sequence length/,
+    );
+    expect(validateForm({ ...form, tabby: { ...tabby, gpu_split: "20, lots" } })).toBe(
+      "GPU split must be sizes in GB",
+    );
+  });
+
   it("validates required and numeric fields", () => {
     const valid = { ...emptyForm, name: "a", executable_path: "/bin/x" };
     expect(validateForm(emptyForm)).toBe("Name is required");

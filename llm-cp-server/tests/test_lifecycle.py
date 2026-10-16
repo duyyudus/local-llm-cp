@@ -217,6 +217,60 @@ async def test_comfyui_runs_behind_its_launcher(
     await wait_for(lambda: not is_alive(child))
 
 
+async def test_tabbyapi_runs_behind_its_start_script(client, runtime: Runtime, tmp_path) -> None:
+    repo = tmp_path / "tabbyAPI"
+    repo.mkdir()
+    (repo / "start.py").write_text(Path(STUB_SERVER).read_text())
+    # The repository's config.yml is the base the --config file is laid over.
+    (repo / "config.yml").write_text("network:\n  host: 0.0.0.0\nmodel:\n  model_name: base\n")
+    (repo / "config_stub.yml").write_text("network:\n  port: 8001\nmodel:\n  max_seq_len: 4096\n")
+    # Like the real script, start.sh moves to its folder and stays the parent of Python.
+    launcher = repo / "start.sh"
+    launcher.write_text(f'#!/bin/sh\ncd "$(dirname "$0")"\n{sys.executable} start.py "$@"\n')
+    launcher.chmod(0o755)
+
+    source = {"engine": "tabbyapi", "working_dir": str(repo)}
+    defaults = await client.post(
+        "/profiles/engine-defaults",
+        json={**source, "engine_options": {"config": "config_stub.yml"}},
+    )
+    assert defaults.json() == {
+        "host": "0.0.0.0",
+        "port": 8001,
+        "model_name": "base",
+        "max_seq_len": 4096,
+    }
+    without_config = await client.post(
+        "/profiles/engine-defaults", json={**source, "env": {"TABBY_NETWORK_PORT": "9000"}}
+    )
+    assert without_config.json() == {"host": "0.0.0.0", "port": 9000, "model_name": "base"}
+    missing = {**source, "engine_options": {"config": "nope.yml"}}
+    assert (await client.post("/profiles/engine-defaults", json=missing)).json() is None
+    invalid = {**source, "engine_options": {"max_seq_len": "long"}}
+    assert (await client.post("/profiles/engine-defaults", json=invalid)).status_code == 422
+
+    # The profile's own port is passed as a flag and wins over the config file.
+    profile = await create_and_start(
+        client,
+        engine="tabbyapi",
+        executable_path="start.sh",
+        working_dir=str(repo),
+        engine_options={"config": "config_stub.yml", "model_name": "glm"},
+    )
+    pid = profile["run"]["pid"]
+    channel = runtime.logs.channel(profile["id"])
+    launched = "extra args: ['--config', 'config_stub.yml', '--model-name', 'glm']"
+    await wait_for(lambda: launched in channel.since(0)[0])
+
+    async def ready() -> bool:
+        return await status_of(client, runtime, profile["id"]) == "ready"
+
+    await wait_for(ready)
+
+    assert (await client.post(f"/profiles/{profile['id']}/stop")).status_code == 200
+    assert not is_alive(pid)
+
+
 async def test_missing_executable_is_rejected(client) -> None:
     profile = (
         await client.post("/profiles", json=profile_payload(executable_path="/nope/llama-server"))

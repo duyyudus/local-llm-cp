@@ -76,7 +76,8 @@ let hostConnected = true;
 const calls: { method: string; path: string; body?: unknown }[] = [];
 
 function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const path = new URL(String(input)).pathname;
+  const url = new URL(String(input));
+  const path = url.pathname;
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   calls.push({ method, path, body });
@@ -94,6 +95,26 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   }
   if (path === "/host/shutdown") {
     return Promise.resolve(new Response(null, { status: 204 }));
+  }
+  if (path === "/profiles/engine-defaults") {
+    const config = (body.engine_options as { config?: string }).config;
+    return json(
+      config === "config_qwen.yml"
+        ? { host: "0.0.0.0", port: 8001, model_name: "Qwen3-32B-exl3", max_seq_len: 32768 }
+        : { host: "127.0.0.1", port: 5000 },
+    );
+  }
+  if (path === "/host/browse" && url.searchParams.get("path") === "/srv/tabbyAPI") {
+    return json({
+      path: "/srv/tabbyAPI",
+      parent: "/srv",
+      entries: [
+        { name: "configs", is_dir: true, size: null },
+        { name: "config_qwen.yml", is_dir: false, size: 512 },
+        { name: "config.yml", is_dir: false, size: 512 },
+        { name: "start.sh", is_dir: false, size: 256 },
+      ],
+    });
   }
   if (path === "/host/browse") {
     return json({
@@ -325,6 +346,90 @@ describe("App", () => {
       port: 8188,
       model_path: null,
       engine_options: { vram_mode: "lowvram", fast: true },
+    });
+  });
+
+  it("creates a tabbyAPI profile whose fields override its config file", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New profile" }));
+    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "tabby" } });
+    fireEvent.click(screen.getByLabelText("Engine"));
+    fireEvent.click(screen.getByRole("option", { name: "tabbyAPI" }));
+    expect(screen.queryByText("Model path")).not.toBeInTheDocument();
+    const host = screen.getByLabelText("Host");
+    const port = screen.getByLabelText("Port");
+    expect(port).toHaveValue("");
+    fireEvent.change(screen.getByPlaceholderText("/path/to/tabbyAPI"), {
+      target: { value: "/srv/tabbyAPI" },
+    });
+    // Empty host and port show what tabbyAPI would use, and stay empty until Tab copies it in.
+    await waitFor(() =>
+      expect(port).toHaveAttribute("placeholder", "5000 (from config, Tab to use)"),
+    );
+    expect(host).toHaveAttribute("placeholder", "127.0.0.1 (from config, Tab to use)");
+    expect(port).toHaveValue("");
+    expect(screen.getByText("Port is required; press Tab in it to use the config's")).toBeVisible();
+
+    // The repository's config files are offered for a one-click choice.
+    const qwen = await screen.findByRole("button", { name: "config_qwen.yml" });
+    expect(
+      screen.getAllByRole("button", { pressed: false }).map((button) => button.textContent),
+    ).toEqual(["config.yml", "config_qwen.yml"]);
+    fireEvent.click(qwen);
+    expect(screen.getByPlaceholderText("config.yml in the repository")).toHaveValue(
+      "config_qwen.yml",
+    );
+    expect(qwen).toHaveAttribute("aria-pressed", "true");
+    // The hints follow the chosen config.
+    await waitFor(() =>
+      expect(port).toHaveAttribute("placeholder", "8001 (from config, Tab to use)"),
+    );
+    expect(fireEvent.keyDown(port, { key: "Tab" })).toBe(false);
+    expect(port).toHaveValue("8001");
+    expect(screen.getByLabelText("Model name")).toHaveAttribute(
+      "placeholder",
+      "Qwen3-32B-exl3 (from config, Tab to use)",
+    );
+    expect(screen.getByLabelText("Max sequence length")).toHaveAttribute(
+      "placeholder",
+      "32768 (from config, Tab to use)",
+    );
+    // Tab copies the config's value into an empty field; once filled, Tab moves on as usual.
+    const seqLen = screen.getByLabelText("Max sequence length");
+    expect(fireEvent.keyDown(seqLen, { key: "Tab" })).toBe(false);
+    expect(seqLen).toHaveValue("32768");
+    expect(fireEvent.keyDown(seqLen, { key: "Tab" })).toBe(true);
+    fireEvent.change(seqLen, { target: { value: "" } });
+    expect(fireEvent.keyDown(seqLen, { key: "Tab", shiftKey: true })).toBe(true);
+    expect(seqLen).toHaveValue("");
+    expect(fireEvent.keyDown(screen.getByLabelText("GPU split (GB)"), { key: "Tab" })).toBe(true);
+
+    // A set value is never replaced by the config.
+    fireEvent.change(port, { target: { value: "9000" } });
+    fireEvent.click(qwen);
+    await waitFor(() =>
+      expect(host).toHaveAttribute("placeholder", "127.0.0.1 (from config, Tab to use)"),
+    );
+    expect(port).toHaveValue("9000");
+    fireEvent.click(qwen);
+    await waitFor(() =>
+      expect(host).toHaveAttribute("placeholder", "0.0.0.0 (from config, Tab to use)"),
+    );
+
+    fireEvent.change(screen.getByLabelText("Model name"), { target: { value: "GLM" } });
+    fireEvent.change(screen.getByLabelText("GPU split (GB)"), { target: { value: "20, 24" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByText("tabby");
+    const created = calls.find((call) => call.method === "POST" && call.path === "/profiles");
+    expect(created?.body).toMatchObject({
+      name: "tabby",
+      engine: "tabbyapi",
+      executable_path: "start.sh",
+      working_dir: "/srv/tabbyAPI",
+      // Left empty, the host is not passed and comes from the config.
+      host: "",
+      port: 9000,
+      engine_options: { config: "config_qwen.yml", model_name: "GLM", gpu_split: [20, 24] },
     });
   });
 

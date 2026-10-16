@@ -4,7 +4,7 @@ import shlex
 
 import pytest
 
-from api_server.app.remote.engines import comfyui, command_line, get_engine
+from api_server.app.remote.engines import comfyui, command_line, get_engine, tabbyapi
 from api_server.app.remote.engines.llama_cpp import (
     build_argv,
     health_url,
@@ -178,6 +178,99 @@ def test_comfyui_options_become_flags() -> None:
     ]
 
 
+def make_tabbyapi(**overrides: object) -> ProfileCreate:
+    values: dict[str, object] = {
+        "engine": "tabbyapi",
+        "executable_path": "start.sh",
+        "working_dir": "~/tabbyAPI",
+        "port": 5000,
+    }
+    values.update(overrides)
+    return make_profile(**values)
+
+
+def test_tabbyapi_runs_start_script_of_the_repository() -> None:
+    profile = make_tabbyapi(extra_args=["--log-prompt true"])
+    argv = tabbyapi.build_argv(profile)
+    assert argv == [
+        "~/tabbyAPI/start.sh",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5000",
+        "--log-prompt",
+        "true",
+    ]
+    assert tabbyapi.working_dir(profile) == "~/tabbyAPI"
+    assert tabbyapi.health_url(profile) == "http://127.0.0.1:5000/health"
+    assert command_line(argv, {}, "~/tabbyAPI").startswith("cd ~/tabbyAPI && ~/tabbyAPI/start.sh ")
+
+
+def test_tabbyapi_profile_values_are_laid_over_the_config_file() -> None:
+    profile = make_tabbyapi(
+        executable_path="/opt/tabby/start.sh",
+        port=8001,
+        engine_options={
+            "config": "configs/qwen 32b.yml",
+            "model_name": "GLM-5.3-Flash-exl3",
+            "max_seq_len": 32768,
+            "gpu_split": [20, 23.5],
+        },
+        extra_args=["--max-seq-len 65536"],
+    )
+    assert tabbyapi.build_argv(profile) == [
+        "/opt/tabby/start.sh",
+        "--config",
+        "configs/qwen 32b.yml",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8001",
+        "--model-name",
+        "GLM-5.3-Flash-exl3",
+        "--max-seq-len",
+        "32768",
+        "--gpu-split",
+        "20",
+        "23.5",
+        # Extra arguments come last, so they win over a form field.
+        "--max-seq-len",
+        "65536",
+    ]
+    # Empty settings are left to the config file.
+    blank = make_tabbyapi(engine_options={"config": "  ", "model_name": " ", "gpu_split": []})
+    assert tabbyapi.build_argv(blank)[1:] == ["--host", "0.0.0.0", "--port", "5000"]
+
+
+def test_tabbyapi_defaults_merge_like_tabbyapi() -> None:
+    read = tabbyapi.config_settings
+    assert read(
+        "network:\n  host: 0.0.0.0\n  port: 8001\n"
+        "model:\n  model_name: glm\n  gpu_split: [20, 24]\n  max_seq_len: null\n"
+    ) == {"host": "0.0.0.0", "port": 8001, "model_name": "glm", "gpu_split": [20, 24]}
+    assert read("model: {}\n") == {}
+    assert read("") == {}
+    for broken in ("network: [", "- a list", "network: 3"):
+        assert read(broken) is None
+
+    env = tabbyapi.env_settings({"TABBY_NETWORK_PORT": "9000", "TABBY_MODEL_MAX_SEQ_LEN": "4096"})
+    assert env == {"port": "9000", "max_seq_len": "4096"}
+    merge = tabbyapi.merge_settings
+    base = {"host": "0.0.0.0", "port": 7000, "model_name": "base"}
+    # tabbyAPI's defaults, then each later layer wins for the values it sets.
+    assert merge([]) == {"host": "127.0.0.1", "port": 5000}
+    assert merge([base, env, {"model_name": "glm"}]) == {
+        "host": "0.0.0.0",
+        "port": 9000,
+        "model_name": "glm",
+        "max_seq_len": 4096,
+    }
+    # Values that would not load are left out rather than shown.
+    assert merge([{"port": "eighty", "max_seq_len": True, "gpu_split": "20,24"}]) == {
+        "host": "127.0.0.1"
+    }
+
+
 def test_engine_options_are_validated_per_engine() -> None:
     with pytest.raises(ValueError, match="repository directory"):
         make_comfyui(working_dir=None)
@@ -185,6 +278,14 @@ def test_engine_options_are_validated_per_engine() -> None:
         make_comfyui(engine_options={"vram_mode": "turbo"})
     with pytest.raises(ValueError, match="no_such_option"):
         make_comfyui(engine_options={"no_such_option": 1})
+    with pytest.raises(ValueError, match="repository directory"):
+        make_tabbyapi(working_dir=None)
+    with pytest.raises(ValueError, match="Invalid tabbyAPI options"):
+        make_tabbyapi(engine_options={"vram_mode": "lowvram"})
+    with pytest.raises(ValueError, match="gpu_split"):
+        make_tabbyapi(engine_options={"gpu_split": [20, -1]})
+    with pytest.raises(ValueError, match="max_seq_len"):
+        make_tabbyapi(engine_options={"max_seq_len": -2})
     with pytest.raises(ValueError, match="no engine options"):
         make_profile(engine_options={"fast": True})
 

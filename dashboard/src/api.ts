@@ -27,7 +27,7 @@ export type RunStatus = {
   command_changed: boolean;
 };
 
-export type EngineOptions = Record<string, string | number | boolean>;
+export type EngineOptions = Record<string, string | number | boolean | number[]>;
 
 export type ProfilePayload = {
   name: string;
@@ -66,6 +66,20 @@ export type ProfileExport = {
 export type ImportResult = { created: string[]; updated: string[]; skipped: string[] };
 
 export type CommandPreview = { command: string; argv: string[] };
+
+export type EngineDefaultsQuery = Pick<
+  ProfilePayload,
+  "engine" | "working_dir" | "engine_options" | "env"
+>;
+
+/** What an engine's own config files give the settings a profile leaves empty. */
+export type EngineDefaults = Partial<{
+  host: string;
+  port: number;
+  model_name: string;
+  max_seq_len: number;
+  gpu_split: number[];
+}>;
 
 export type HostInfo = {
   mode: string;
@@ -183,6 +197,12 @@ export const api = {
     request<CommandPreview>("/profiles/preview-command", {
       method: "POST",
       body: JSON.stringify(payload),
+      signal,
+    }),
+  engineDefaults: (query: EngineDefaultsQuery, signal?: AbortSignal) =>
+    request<EngineDefaults | null>("/profiles/engine-defaults", {
+      method: "POST",
+      body: JSON.stringify(query),
       signal,
     }),
   startProfile: (id: string) => request<Profile>(`/profiles/${id}/start`, { method: "POST" }),

@@ -219,7 +219,13 @@ export function ProfileList({
                     <RunStatusBadge status={profile.run.status} />
                   </div>
                   <div className="mt-1 truncate font-mono text-xs text-zinc-400">
-                    {profile.engine === "comfyui"
+                    {profile.engine === "tabbyapi"
+                      ? String(
+                          profile.engine_options.model_name ??
+                            profile.engine_options.config ??
+                            baseName(profile.working_dir),
+                        )
+                      : profile.engine === "comfyui"
                       ? baseName(profile.working_dir)
                       : baseName(profile.model_path) || baseName(profile.executable_path)}
                   </div>

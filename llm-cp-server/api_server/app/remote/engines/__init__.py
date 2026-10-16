@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import shlex
 from types import ModuleType
+from typing import Any
 
-from api_server.app.remote.engines import comfyui, llama_cpp
+from api_server.app.remote.engines import comfyui, llama_cpp, tabbyapi
 
-ENGINES: dict[str, ModuleType] = {"llama.cpp": llama_cpp, "comfyui": comfyui}
+ENGINES: dict[str, ModuleType] = {"llama.cpp": llama_cpp, "comfyui": comfyui, "tabbyapi": tabbyapi}
 DEFAULT_ENGINE = "llama.cpp"
 
 
@@ -15,6 +16,12 @@ def get_engine(name: str) -> ModuleType:
     except KeyError as exc:
         supported = ", ".join(ENGINES)
         raise ValueError(f"Unsupported engine: {name}. Supported engines: {supported}") from exc
+
+
+async def read_defaults(executor: Any, source: Any) -> dict[str, Any] | None:
+    """Values an engine takes from its own config files on the host for unset settings."""
+    reader = getattr(get_engine(source.engine), "read_defaults", None)
+    return await reader(executor, source) if reader else None
 
 
 def quote_path(path: str) -> str:

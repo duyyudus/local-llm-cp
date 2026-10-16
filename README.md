@@ -65,6 +65,25 @@ common ComfyUI flags (VRAM mode, preview method, reserved VRAM, output, input an
 config, and a few switches); the rest goes in **Extra arguments** as before. **uv executable**
 defaults to `~/.local/bin/uv`; change it if uv is installed elsewhere on the GPU host.
 
+**tabbyAPI** works the same way: pick the tabbyAPI repository folder and the server is started
+with its `start.sh`. Its form has a **Config file**, passed as `--config` (relative paths
+resolve from the repository); once the folder is set, the repository's `config*.yml` files are
+listed for a one-click choice. Host, port, model name, max sequence length and GPU split are
+form fields too. Priority, highest first:
+
+1. The form fields and **Extra arguments** (extra arguments come last, so they win over a field).
+2. The config file.
+3. `TABBY_*` variables in the profile's environment, then the repository's `config.yml`, then
+   tabbyAPI's defaults.
+
+An empty field leaves the value to the config; the form shows that value greyed out, and Tab
+in the empty field copies it in. A set value is never replaced. Port is the one field that
+cannot stay empty, since the app needs it to check readiness and port conflicts. This relies on
+tabbyAPI applying command line values on top of `--config`, which upstream tabbyAPI does not
+do; it needs the `config-cli-overrides` change in the fork
+(https://github.com/duyyudus/tabbyAPI). Run `start.sh` once by hand first so its interactive GPU
+library prompt is answered and saved in `start_options.json`.
+
 Several profiles can run at once as long as their ports differ. Editing a running profile
 takes effect at its next start.
 

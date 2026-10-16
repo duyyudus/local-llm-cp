@@ -1,10 +1,17 @@
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
-import { api } from "../../api";
+import { api, type EngineDefaults } from "../../api";
 import { Select } from "../../components/Select";
 import { errorMessage } from "../../lib/format";
 import { PathPicker } from "./PathPicker";
+import { RepoConfigs } from "./RepoConfigs";
 import {
   COMFY_PATHS,
   COMFY_PREVIEW_METHODS,
@@ -16,6 +23,7 @@ import {
   validateForm,
   withEngine,
   type ComfyFormState,
+  type TabbyFormState,
   type Engine,
   type ProfileFormState,
 } from "./form";
@@ -30,7 +38,9 @@ type Picker = {
 const EXTRA_ARGS_PLACEHOLDER: Record<Engine, string> = {
   "llama.cpp": "--flash-attn on\n--parallel 2\n--jinja",
   comfyui: "--cuda-device 0\n--use-pytorch-cross-attention\n--verbose DEBUG",
+  tabbyapi: "--gpu-lib cu12\n--model-name Qwen3-32B-exl3",
 };
+
 
 export function ProfileForm({
   form,
@@ -60,11 +70,15 @@ export function ProfileForm({
     area.style.height = `${area.scrollHeight + area.offsetHeight - area.clientHeight}px`;
   }, []);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [tabbyDefaults, setTabbyDefaults] = useState<EngineDefaults | null>(null);
   const invalid = validateForm(form);
-  const comfyui = form.engine === "comfyui";
 
   function update<K extends keyof ProfileFormState>(key: K, value: ProfileFormState[K]) {
     setForm({ ...form, [key]: value });
+  }
+
+  function updateTabby<K extends keyof TabbyFormState>(key: K, value: TabbyFormState[K]) {
+    setForm({ ...form, tabby: { ...form.tabby, [key]: value } });
   }
 
   function updateComfy<K extends keyof ComfyFormState>(key: K, value: ComfyFormState[K]) {
@@ -91,6 +105,34 @@ export function ProfileForm({
       controller.abort();
     };
   }, [form]);
+
+  // Whatever the profile leaves empty, tabbyAPI takes from its config files; show what that is.
+  const tabbyRepo = form.engine === "tabbyapi" ? form.working_dir.trim() : "";
+  const tabbyConfig = form.tabby.config.trim();
+  const tabbyEnv = JSON.stringify(payloadFromForm(form).env);
+  useEffect(() => {
+    setTabbyDefaults(null);
+    if (!tabbyRepo) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      api
+        .engineDefaults(
+          {
+            engine: "tabbyapi",
+            working_dir: tabbyRepo,
+            engine_options: tabbyConfig ? { config: tabbyConfig } : {},
+            env: JSON.parse(tabbyEnv),
+          },
+          controller.signal,
+        )
+        .then(setTabbyDefaults)
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [tabbyRepo, tabbyConfig, tabbyEnv]);
 
   const pathField = (
     label: string,
@@ -121,6 +163,17 @@ export function ProfileForm({
     </label>
   );
 
+  // Tab in an empty field copies the config's value in.
+  const configHint = (value: string, hint: string | undefined, fill: (hint: string) => void) => ({
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Tab" || event.shiftKey || !hint || value !== "") return;
+      event.preventDefault();
+      fill(hint);
+    },
+    placeholder: hint ? `${hint} (from config, Tab to use)` : undefined,
+  });
+
+  const tabby = form.engine === "tabbyapi";
   const hostAndPort = (
     <>
       <label className="form-control">
@@ -128,6 +181,9 @@ export function ProfileForm({
         <input
           className="input input-bordered input-sm font-mono text-xs"
           onChange={(event) => update("host", event.target.value)}
+          {...(tabby
+            ? configHint(form.host, tabbyDefaults?.host, (value) => update("host", value))
+            : {})}
           value={form.host}
         />
       </label>
@@ -137,6 +193,11 @@ export function ProfileForm({
           className="input input-bordered input-sm font-mono text-xs"
           inputMode="numeric"
           onChange={(event) => update("port", event.target.value)}
+          {...(tabby
+            ? configHint(form.port, tabbyDefaults?.port?.toString(), (value) =>
+                update("port", value),
+              )
+            : {})}
           value={form.port}
         />
       </label>
@@ -284,6 +345,82 @@ export function ProfileForm({
     </>
   );
 
+  // An empty field shows the config's value; Tab copies it in to start editing from it.
+  const tabbyField = (
+    key: Exclude<keyof TabbyFormState, "config">,
+    label: string,
+    fallback: string,
+    { hint, wide = false, numeric = false, title }: {
+      hint?: string;
+      wide?: boolean;
+      numeric?: boolean;
+      title?: string;
+    },
+  ) => (
+    <label className={wide ? "form-control sm:col-span-2" : "form-control"}>
+      <span className="label-text">{label}</span>
+      <input
+        className="input input-bordered input-sm font-mono text-xs"
+        inputMode={numeric ? "numeric" : undefined}
+        onChange={(event) => updateTabby(key, event.target.value)}
+        {...configHint(form.tabby[key], hint, (value) => updateTabby(key, value))}
+        placeholder={hint ? `${hint} (from config, Tab to use)` : fallback}
+        title={title}
+        value={form.tabby[key]}
+      />
+    </label>
+  );
+
+  const tabbyFields = (
+    <>
+      {pathField(
+        "tabbyAPI directory",
+        "/path/to/tabbyAPI",
+        form.working_dir,
+        (current, path) => ({ ...current, working_dir: path }),
+        "Choose the tabbyAPI repository",
+        true,
+      )}
+      <p className="-mt-2 text-xs text-zinc-500 sm:col-span-2">
+        The repository that holds start.sh. The server is started with that script, which sets
+        up and activates the repository&apos;s venv.
+      </p>
+      {pathField(
+        "Config file",
+        "config.yml in the repository",
+        form.tabby.config,
+        (current, path) => ({ ...current, tabby: { ...current.tabby, config: path } }),
+        "Choose a tabbyAPI config file",
+      )}
+      <RepoConfigs
+        onChange={(value) => updateTabby("config", value)}
+        repo={form.working_dir}
+        value={form.tabby.config}
+      />
+      <p className="-mt-2 text-xs text-zinc-500 sm:col-span-2">
+        Passed as --config; relative paths resolve from the repository. Every field below that is
+        set overrides the file, and so do the extra arguments. Empty fields keep the
+        file&apos;s value, shown greyed out; press Tab in one to copy it in.
+      </p>
+      {hostAndPort}
+      {tabbyField("model_name", "Model name", "no model loaded at start", {
+        wide: true,
+        hint: tabbyDefaults?.model_name,
+      })}
+      {tabbyField("max_seq_len", "Max sequence length", "tabbyAPI default", {
+        hint: tabbyDefaults?.max_seq_len?.toString(),
+        numeric: true,
+        title: "-1 takes the length from the model's config.json",
+      })}
+      {tabbyField("gpu_split", "GPU split (GB)", "automatic", {
+        hint: tabbyDefaults?.gpu_split?.join(", "),
+        title: "VRAM to use on each GPU, e.g. 20, 24",
+      })}
+    </>
+  );
+
+  const engineFields = { "llama.cpp": llamaFields, comfyui: comfyFields, tabbyapi: tabbyFields };
+
   return (
     <div
       className="fixed inset-0 z-30 flex justify-end lg:justify-start lg:pl-[calc(var(--sidebar)+0.25rem)]"
@@ -324,7 +461,7 @@ export function ProfileForm({
               options={ENGINES}
               value={form.engine}
             />
-            {comfyui ? comfyFields : llamaFields}
+            {engineFields[form.engine]}
           </div>
 
           <label className="form-control">

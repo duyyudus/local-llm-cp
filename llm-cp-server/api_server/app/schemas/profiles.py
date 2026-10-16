@@ -155,6 +155,16 @@ class ImportResult(BaseModel):
     skipped: list[str]
 
 
+class EngineDefaultsQuery(BaseModel):
+    engine: str = Field(default=DEFAULT_ENGINE, max_length=32)
+    working_dir: str | None = None
+    engine_options: dict[str, Any] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
+
+    _engine = field_validator("engine")(_validate_engine)
+    _blank = field_validator("working_dir")(_blank_to_none)
+
+
 class CommandPreview(BaseModel):
     command: str
     argv: list[str]
